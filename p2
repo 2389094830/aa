@@ -1,0 +1,1705 @@
+-- FLOOK HUB UI v17
+-- Load AFTER core v17. Ctrl = toggle visibility.
+--
+-- v17 CHANGELOG:
+-- 1. Rebirth Machine tab added — type pet name, toggle auto rebirth.
+--    Shows how many matching pets you have, fires UseRebirthMachine with 5.
+--    Default pet: Hyperwave Doggy.
+-- 2. Event tab: Doodle Rift section added above July 4th Rift.
+--    Passive detection only (slug: doodle-rift). Same pattern as July4th.
+-- 3. Console active list: "Doodle" and "Rebirth" entries added.
+
+local FH = _G.FH
+if not FH then warn("[FH UI] Core not loaded!") return end
+local State = FH.State
+
+local Players     = game:GetService("Players")
+local RunService  = game:GetService("RunService")
+local UIS         = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+local lp          = Players.LocalPlayer
+
+local P = {
+    bg       = Color3.fromRGB(10,  10,  14),
+    panel    = Color3.fromRGB(15,  15,  21),
+    tile     = Color3.fromRGB(21,  21,  29),
+    card     = Color3.fromRGB(26,  26,  36),
+    line     = Color3.fromRGB(38,  38,  52),
+    txt      = Color3.fromRGB(220, 220, 232),
+    muted    = Color3.fromRGB(100, 100, 120),
+    dim      = Color3.fromRGB(46,  46,  60),
+    cyan     = Color3.fromRGB(0,   195, 255),
+    lime     = Color3.fromRGB(65,  245, 125),
+    amber    = Color3.fromRGB(255, 175, 20),
+    rose     = Color3.fromRGB(255, 55,  95),
+    violet   = Color3.fromRGB(150, 70,  255),
+    sky      = Color3.fromRGB(50,  150, 255),
+    teal     = Color3.fromRGB(0,   200, 170),
+    offbg    = Color3.fromRGB(18,  18,  26),
+    obsidian = Color3.fromRGB(120, 60,  200),
+    gold     = Color3.fromRGB(255, 200, 50),
+    red      = Color3.fromRGB(255, 80,  60),
+    doodle   = Color3.fromRGB(255, 120, 200),
+    rebirth  = Color3.fromRGB(80,  220, 255),
+}
+
+local TABS = {
+    {key="console", label="Console", col=P.cyan},
+    {key="hatch",   label="Hatch",   col=P.amber},
+    {key="quests",  label="Quests",  col=P.sky},
+    {key="global",  label="G.Inc",   col=P.amber},
+    {key="genie",   label="Genie",   col=P.violet},
+    {key="rift",    label="Rift",    col=P.violet},
+    {key="rebirth", label="Rebirth", col=P.rebirth},
+    {key="enchant", label="Enchant", col=P.violet},
+    {key="shrine",  label="Shrine",  col=P.rose},
+    {key="event",   label="Event",   col=P.gold},
+    {key="misc",    label="Misc",    col=P.teal},
+}
+
+-- ══════════════════════════════════════════
+-- WINDOW
+-- ══════════════════════════════════════════
+if lp.PlayerGui:FindFirstChild("FlookHub") then
+    lp.PlayerGui.FlookHub:Destroy()
+end
+
+local sg = Instance.new("ScreenGui")
+sg.Name           = "FlookHub"
+sg.ResetOnSpawn   = false
+sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+sg.IgnoreGuiInset = true
+sg.DisplayOrder   = 999
+sg.Parent         = lp.PlayerGui
+
+local win = Instance.new("Frame", sg)
+win.Name             = "Win"
+win.Size             = UDim2.fromOffset(462, 355)
+win.Position         = UDim2.fromOffset(14, 70)
+win.BackgroundColor3 = P.bg
+win.BorderSizePixel  = 0
+win.Active           = true
+win.Draggable        = true
+win.ClipsDescendants = false
+win.ZIndex           = 999
+Instance.new("UICorner", win).CornerRadius = UDim.new(0, 10)
+do local st = Instance.new("UIStroke", win) st.Color = P.line st.Thickness = 1 end
+
+UIS.InputBegan:Connect(function(inp, gpe)
+    if gpe then return end
+    if inp.KeyCode == Enum.KeyCode.LeftControl or inp.KeyCode == Enum.KeyCode.RightControl then
+        win.Visible = not win.Visible
+    end
+end)
+
+-- ══════════════════════════════════════════
+-- SIDEBAR
+-- ══════════════════════════════════════════
+local SIDEBAR_W  = 70
+local TAB_H      = 24
+local TAB_GAP    = 3
+local LOGO_AREA  = 56
+local TAB_STRIDE = TAB_H + TAB_GAP
+
+local sidebar = Instance.new("Frame", win)
+sidebar.Name             = "Sidebar"
+sidebar.Size             = UDim2.fromOffset(SIDEBAR_W, 355)
+sidebar.BackgroundColor3 = P.panel
+sidebar.BorderSizePixel  = 0
+sidebar.ZIndex           = 11
+sidebar.ClipsDescendants = true
+Instance.new("UICorner", sidebar).CornerRadius = UDim.new(0, 10)
+do
+    local f = Instance.new("Frame", sidebar)
+    f.Size             = UDim2.fromOffset(10, 355)
+    f.Position         = UDim2.new(1, -10, 0, 0)
+    f.BackgroundColor3 = P.panel
+    f.BorderSizePixel  = 0
+    f.ZIndex           = 11
+end
+do
+    local img = Instance.new("ImageLabel", sidebar)
+    img.Name                   = "Logo"
+    img.Size                   = UDim2.fromOffset(48, 48)
+    img.Position               = UDim2.fromOffset(11, 4)
+    img.BackgroundTransparency = 1
+    img.ScaleType              = Enum.ScaleType.Fit
+    img.ZIndex                 = 12
+    img.Image                  = "rbxthumb://type=Asset&id=91530574534343&w=150&h=150"
+end
+do
+    local d = Instance.new("Frame", sidebar)
+    d.Size             = UDim2.fromOffset(50, 1)
+    d.Position         = UDim2.fromOffset(10, 54)
+    d.BackgroundColor3 = P.line
+    d.BorderSizePixel  = 0
+    d.ZIndex           = 12
+end
+do
+    local d = Instance.new("Frame", win)
+    d.Size             = UDim2.fromOffset(1, 343)
+    d.Position         = UDim2.fromOffset(SIDEBAR_W, 6)
+    d.BackgroundColor3 = P.line
+    d.BorderSizePixel  = 0
+    d.ZIndex           = 11
+end
+
+local tabScroll = Instance.new("ScrollingFrame", sidebar)
+tabScroll.Name                   = "TabScroll"
+tabScroll.Size                   = UDim2.fromOffset(SIDEBAR_W, 355 - LOGO_AREA)
+tabScroll.Position               = UDim2.fromOffset(0, LOGO_AREA)
+tabScroll.BackgroundTransparency = 1
+tabScroll.BorderSizePixel        = 0
+tabScroll.ScrollBarThickness     = 2
+tabScroll.ScrollBarImageColor3   = P.line
+tabScroll.CanvasSize             = UDim2.fromOffset(0, #TABS * TAB_STRIDE + 4)
+tabScroll.AutomaticCanvasSize    = Enum.AutomaticSize.None
+tabScroll.ScrollingDirection     = Enum.ScrollingDirection.Y
+tabScroll.ZIndex                 = 12
+
+local pages   = {}
+local tabBtns = {}
+
+for i, tab in ipairs(TABS) do
+    local btn = Instance.new("TextButton", tabScroll)
+    btn.Size                   = UDim2.fromOffset(60, TAB_H)
+    btn.Position               = UDim2.fromOffset(5, (i-1)*TAB_STRIDE + 2)
+    btn.BackgroundColor3       = P.offbg
+    btn.BackgroundTransparency = 0.3
+    btn.BorderSizePixel        = 0
+    btn.Text                   = tab.label
+    btn.TextColor3             = P.muted
+    btn.TextSize               = 7
+    btn.Font                   = Enum.Font.GothamBold
+    btn.ZIndex                 = 13
+    btn.AutoButtonColor        = false
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
+    tabBtns[tab.key] = btn
+
+    local s = Instance.new("ScrollingFrame", win)
+    s.Name                   = "Page_" .. tab.key
+    s.Size                   = UDim2.fromOffset(384, 343)
+    s.Position               = UDim2.fromOffset(SIDEBAR_W + 2, 6)
+    s.BackgroundTransparency = 1
+    s.BorderSizePixel        = 0
+    s.ScrollBarThickness     = 2
+    s.ScrollBarImageColor3   = P.line
+    s.AutomaticCanvasSize    = Enum.AutomaticSize.Y
+    s.CanvasSize             = UDim2.fromOffset(0, 0)
+    s.Visible                = false
+    s.ZIndex                 = 10
+
+    local c = Instance.new("Frame", s)
+    c.Name                   = "Content"
+    c.Size                   = UDim2.new(1, 0, 0, 0)
+    c.AutomaticSize          = Enum.AutomaticSize.Y
+    c.BackgroundTransparency = 1
+    c.ZIndex                 = 10
+    local ll = Instance.new("UIListLayout", c)
+    ll.SortOrder = Enum.SortOrder.LayoutOrder
+    ll.Padding   = UDim.new(0, 4)
+    local pp = Instance.new("UIPadding", c)
+    pp.PaddingTop    = UDim.new(0, 8)
+    pp.PaddingBottom = UDim.new(0, 8)
+    pp.PaddingLeft   = UDim.new(0, 8)
+    pp.PaddingRight  = UDim.new(0, 8)
+
+    pages[tab.key] = {scroll = s, content = c}
+end
+
+local activeTab = "console"
+local function setTab(key)
+    activeTab = key
+    for _, tab in ipairs(TABS) do
+        local k = tab.key
+        pages[k].scroll.Visible = (k == key)
+        local b = tabBtns[k]
+        if k == key then
+            b.BackgroundColor3       = tab.col
+            b.BackgroundTransparency = 0.65
+            b.TextColor3             = tab.col
+        else
+            b.BackgroundColor3       = P.offbg
+            b.BackgroundTransparency = 0.3
+            b.TextColor3             = P.muted
+        end
+    end
+end
+for _, tab in ipairs(TABS) do
+    local key = tab.key
+    tabBtns[key].MouseButton1Click:Connect(function() setTab(key) end)
+end
+
+-- ══════════════════════════════════════════
+-- WIDGET FACTORY
+-- ══════════════════════════════════════════
+local function makeWidgets(parent)
+    local lo = 0
+    local w  = {}
+
+    function w.section(txt, col)
+        lo += 1
+        local f = Instance.new("Frame", parent)
+        f.Size                   = UDim2.new(1, 0, 0, 16)
+        f.BackgroundTransparency = 1
+        f.LayoutOrder            = lo
+        local bar = Instance.new("Frame", f)
+        bar.Size             = UDim2.fromOffset(2, 9)
+        bar.Position         = UDim2.fromOffset(0, 3)
+        bar.BackgroundColor3 = col or P.cyan
+        bar.BorderSizePixel  = 0
+        Instance.new("UICorner", bar).CornerRadius = UDim.new(1, 0)
+        local l = Instance.new("TextLabel", f)
+        l.Size                   = UDim2.new(1, -8, 1, 0)
+        l.Position               = UDim2.fromOffset(7, 0)
+        l.BackgroundTransparency = 1
+        l.Text                   = txt:upper()
+        l.TextColor3             = col or P.cyan
+        l.TextSize               = 7
+        l.Font                   = Enum.Font.GothamBold
+        l.TextXAlignment         = Enum.TextXAlignment.Left
+        return f
+    end
+
+    function w.note(txt, col)
+        lo += 1
+        local l = Instance.new("TextLabel", parent)
+        l.Size                   = UDim2.new(1, 0, 0, 11)
+        l.BackgroundTransparency = 1
+        l.Text                   = txt
+        l.TextColor3             = col or P.dim
+        l.TextSize               = 7
+        l.Font                   = Enum.Font.Gotham
+        l.TextXAlignment         = Enum.TextXAlignment.Left
+        l.LayoutOrder            = lo
+        return l
+    end
+
+    function w.pill(txt, col)
+        lo += 1
+        local f = Instance.new("Frame", parent)
+        f.Size             = UDim2.new(1, 0, 0, 24)
+        f.BackgroundColor3 = P.tile
+        f.BorderSizePixel  = 0
+        f.LayoutOrder      = lo
+        Instance.new("UICorner", f).CornerRadius = UDim.new(0, 6)
+        do local st = Instance.new("UIStroke", f) st.Color = P.line st.Thickness = 1 end
+        local l = Instance.new("TextLabel", f)
+        l.Size                   = UDim2.new(1, -12, 1, 0)
+        l.Position               = UDim2.fromOffset(9, 0)
+        l.BackgroundTransparency = 1
+        l.Text                   = txt
+        l.TextColor3             = col or P.muted
+        l.TextSize               = 9
+        l.Font                   = Enum.Font.Gotham
+        l.TextXAlignment         = Enum.TextXAlignment.Left
+        l.TextWrapped            = true
+        return l
+    end
+
+    function w.statusBox(txt)
+        lo += 1
+        local f = Instance.new("Frame", parent)
+        f.Size             = UDim2.new(1, 0, 0, 38)
+        f.BackgroundColor3 = P.tile
+        f.BorderSizePixel  = 0
+        f.LayoutOrder      = lo
+        Instance.new("UICorner", f).CornerRadius = UDim.new(0, 8)
+        do local st = Instance.new("UIStroke", f) st.Color = P.cyan st.Thickness = 1 st.Transparency = 0.65 end
+        local acc = Instance.new("Frame", f)
+        acc.Size             = UDim2.fromOffset(3, 20)
+        acc.Position         = UDim2.fromOffset(10, 9)
+        acc.BackgroundColor3 = P.cyan
+        acc.BorderSizePixel  = 0
+        Instance.new("UICorner", acc).CornerRadius = UDim.new(1, 0)
+        local l = Instance.new("TextLabel", f)
+        l.Size                   = UDim2.new(1, -26, 1, 0)
+        l.Position               = UDim2.fromOffset(18, 0)
+        l.BackgroundTransparency = 1
+        l.Text                   = txt
+        l.TextColor3             = P.txt
+        l.TextSize               = 10
+        l.Font                   = Enum.Font.GothamBold
+        l.TextXAlignment         = Enum.TextXAlignment.Left
+        l.TextWrapped            = true
+        return l, acc
+    end
+
+    function w.infoRow(label, val)
+        lo += 1
+        local f = Instance.new("Frame", parent)
+        f.Size             = UDim2.new(1, 0, 0, 20)
+        f.BackgroundColor3 = P.tile
+        f.BorderSizePixel  = 0
+        f.LayoutOrder      = lo
+        Instance.new("UICorner", f).CornerRadius = UDim.new(0, 5)
+        local lk = Instance.new("TextLabel", f)
+        lk.Size                   = UDim2.new(0.58, 0, 1, 0)
+        lk.Position               = UDim2.fromOffset(8, 0)
+        lk.BackgroundTransparency = 1
+        lk.Text                   = label
+        lk.TextColor3             = P.muted
+        lk.TextSize               = 8
+        lk.Font                   = Enum.Font.Gotham
+        lk.TextXAlignment         = Enum.TextXAlignment.Left
+        local lv = Instance.new("TextLabel", f)
+        lv.Size                   = UDim2.new(0.42, -6, 1, 0)
+        lv.Position               = UDim2.new(0.58, 0, 0, 0)
+        lv.BackgroundTransparency = 1
+        lv.Text                   = val or "-"
+        lv.TextColor3             = P.txt
+        lv.TextSize               = 8
+        lv.Font                   = Enum.Font.GothamBold
+        lv.TextXAlignment         = Enum.TextXAlignment.Right
+        return f, lk, lv
+    end
+
+    function w.toggle(label, defaultOn, ac)
+        lo += 1
+        ac = ac or P.cyan
+        local f = Instance.new("Frame", parent)
+        f.Size             = UDim2.new(1, 0, 0, 28)
+        f.BackgroundColor3 = P.tile
+        f.BorderSizePixel  = 0
+        f.LayoutOrder      = lo
+        Instance.new("UICorner", f).CornerRadius = UDim.new(0, 7)
+        local stroke = Instance.new("UIStroke", f)
+        stroke.Color     = defaultOn and ac or P.line
+        stroke.Thickness = 1
+        local nameLbl = Instance.new("TextLabel", f)
+        nameLbl.Size                   = UDim2.new(1, -52, 1, 0)
+        nameLbl.Position               = UDim2.fromOffset(10, 0)
+        nameLbl.BackgroundTransparency = 1
+        nameLbl.Text                   = label
+        nameLbl.TextColor3             = defaultOn and P.txt or P.muted
+        nameLbl.TextSize               = 9
+        nameLbl.Font                   = Enum.Font.GothamBold
+        nameLbl.TextXAlignment         = Enum.TextXAlignment.Left
+        local track = Instance.new("Frame", f)
+        track.Size             = UDim2.fromOffset(34, 16)
+        track.Position         = UDim2.new(1, -40, 0.5, -8)
+        track.BackgroundColor3 = defaultOn and ac or P.line
+        track.BorderSizePixel  = 0
+        Instance.new("UICorner", track).CornerRadius = UDim.new(1, 0)
+        local knob = Instance.new("Frame", track)
+        knob.Size             = UDim2.fromOffset(10, 10)
+        knob.Position         = defaultOn and UDim2.fromOffset(21, 3) or UDim2.fromOffset(3, 3)
+        knob.BackgroundColor3 = defaultOn and P.bg or P.muted
+        knob.BorderSizePixel  = 0
+        Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+        local state = defaultOn
+        local cb    = nil
+        local function setState(val)
+            state                  = val
+            track.BackgroundColor3 = val and ac or P.line
+            knob.Position          = val and UDim2.fromOffset(21, 3) or UDim2.fromOffset(3, 3)
+            knob.BackgroundColor3  = val and P.bg or P.muted
+            stroke.Color           = val and ac or P.line
+            nameLbl.TextColor3     = val and P.txt or P.muted
+            if cb then cb(val) end
+        end
+        local hit = Instance.new("TextButton", f)
+        hit.Size                   = UDim2.fromScale(1, 1)
+        hit.BackgroundTransparency = 1
+        hit.Text                   = ""
+        hit.ZIndex                 = 13
+        hit.MouseButton1Click:Connect(function() setState(not state) end)
+        return f,
+            function() return state end,
+            function(fn) cb = fn end,
+            function(val) setState(val) end
+    end
+
+    function w.gap(h)
+        lo += 1
+        local f = Instance.new("Frame", parent)
+        f.Size                   = UDim2.new(1, 0, 0, h or 4)
+        f.BackgroundTransparency = 1
+        f.LayoutOrder            = lo
+    end
+
+    function w.questRow(label)
+        lo += 1
+        local f = Instance.new("Frame", parent)
+        f.Size             = UDim2.new(1, 0, 0, 20)
+        f.BackgroundColor3 = P.tile
+        f.BorderSizePixel  = 0
+        f.LayoutOrder      = lo
+        Instance.new("UICorner", f).CornerRadius = UDim.new(0, 5)
+        local nl = Instance.new("TextLabel", f)
+        nl.Size                   = UDim2.new(0.67, 0, 1, 0)
+        nl.Position               = UDim2.fromOffset(7, 0)
+        nl.BackgroundTransparency = 1
+        nl.Text                   = label
+        nl.TextColor3             = P.muted
+        nl.TextSize               = 8
+        nl.Font                   = Enum.Font.Gotham
+        nl.TextXAlignment         = Enum.TextXAlignment.Left
+        local sl = Instance.new("TextLabel", f)
+        sl.Size                   = UDim2.new(0.33, -5, 1, 0)
+        sl.Position               = UDim2.new(0.67, 0, 0, 0)
+        sl.BackgroundTransparency = 1
+        sl.Text                   = "..."
+        sl.TextColor3             = P.muted
+        sl.TextSize               = 8
+        sl.Font                   = Enum.Font.GothamBold
+        sl.TextXAlignment         = Enum.TextXAlignment.Right
+        return f, nl, sl
+    end
+
+    function w.numInput(label, default)
+        lo += 1
+        local f = Instance.new("Frame", parent)
+        f.Size             = UDim2.new(1, 0, 0, 24)
+        f.BackgroundColor3 = P.tile
+        f.BorderSizePixel  = 0
+        f.LayoutOrder      = lo
+        Instance.new("UICorner", f).CornerRadius = UDim.new(0, 6)
+        local l = Instance.new("TextLabel", f)
+        l.Size                   = UDim2.new(0.58, 0, 1, 0)
+        l.Position               = UDim2.fromOffset(8, 0)
+        l.BackgroundTransparency = 1
+        l.Text                   = label
+        l.TextColor3             = P.muted
+        l.TextSize               = 8
+        l.Font                   = Enum.Font.Gotham
+        l.TextXAlignment         = Enum.TextXAlignment.Left
+        local box = Instance.new("TextBox", f)
+        box.Size             = UDim2.new(0.42, -8, 0.7, 0)
+        box.Position         = UDim2.new(0.58, 4, 0.15, 0)
+        box.BackgroundColor3 = P.card
+        box.BorderSizePixel  = 0
+        box.Text             = tostring(default)
+        box.TextColor3       = P.txt
+        box.TextSize         = 8
+        box.Font             = Enum.Font.GothamBold
+        box.ClearTextOnFocus = false
+        Instance.new("UICorner", box).CornerRadius = UDim.new(0, 4)
+        return f, box
+    end
+
+    function w.strInput(label, default)
+        lo += 1
+        local f = Instance.new("Frame", parent)
+        f.Size             = UDim2.new(1, 0, 0, 24)
+        f.BackgroundColor3 = P.tile
+        f.BorderSizePixel  = 0
+        f.LayoutOrder      = lo
+        Instance.new("UICorner", f).CornerRadius = UDim.new(0, 6)
+        local l = Instance.new("TextLabel", f)
+        l.Size                   = UDim2.new(0.42, 0, 1, 0)
+        l.Position               = UDim2.fromOffset(8, 0)
+        l.BackgroundTransparency = 1
+        l.Text                   = label
+        l.TextColor3             = P.muted
+        l.TextSize               = 8
+        l.Font                   = Enum.Font.Gotham
+        l.TextXAlignment         = Enum.TextXAlignment.Left
+        local box = Instance.new("TextBox", f)
+        box.Size             = UDim2.new(0.58, -8, 0.7, 0)
+        box.Position         = UDim2.new(0.42, 4, 0.15, 0)
+        box.BackgroundColor3 = P.card
+        box.BorderSizePixel  = 0
+        box.Text             = tostring(default)
+        box.TextColor3       = P.txt
+        box.TextSize         = 8
+        box.Font             = Enum.Font.GothamBold
+        box.ClearTextOnFocus = false
+        Instance.new("UICorner", box).CornerRadius = UDim.new(0, 4)
+        return f, box
+    end
+
+    function w.actionBtn(label, col)
+        lo += 1
+        local ac = col or P.tile
+        local b  = Instance.new("TextButton", parent)
+        b.Size                   = UDim2.new(1, 0, 0, 26)
+        b.BackgroundColor3       = ac
+        b.BackgroundTransparency = 0.78
+        b.BorderSizePixel        = 0
+        b.Text                   = label
+        b.TextColor3             = P.txt
+        b.TextSize               = 8
+        b.Font                   = Enum.Font.GothamBold
+        b.LayoutOrder            = lo
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+        do local st = Instance.new("UIStroke", b) st.Color = ac st.Thickness = 1 st.Transparency = 0.55 end
+        return b
+    end
+
+    function w.eggDropdown(currentName)
+        lo += 1
+        local holder = Instance.new("Frame", parent)
+        holder.Size                   = UDim2.new(1, 0, 0, 26)
+        holder.BackgroundTransparency = 1
+        holder.BorderSizePixel        = 0
+        holder.LayoutOrder            = lo
+        holder.ClipsDescendants       = false
+
+        local dBtn = Instance.new("TextButton", holder)
+        dBtn.Size                   = UDim2.fromScale(1, 1)
+        dBtn.BackgroundColor3       = P.tile
+        dBtn.BorderSizePixel        = 0
+        dBtn.TextColor3             = P.amber
+        dBtn.TextSize               = 9
+        dBtn.Font                   = Enum.Font.GothamBold
+        dBtn.Text                   = "[v]  " .. (currentName or State.selectedEggName)
+        dBtn.TextXAlignment         = Enum.TextXAlignment.Left
+        Instance.new("UICorner", dBtn).CornerRadius = UDim.new(0, 6)
+        Instance.new("UIPadding", dBtn).PaddingLeft = UDim.new(0, 8)
+        do local ds = Instance.new("UIStroke", dBtn) ds.Color = P.amber ds.Thickness = 1 ds.Transparency = 0.65 end
+
+        local panel = Instance.new("Frame", sg)
+        panel.Size             = UDim2.fromOffset(270, math.min(#FH.EGG_NAMES, 9) * 20)
+        panel.BackgroundColor3 = P.panel
+        panel.BorderSizePixel  = 0
+        panel.Visible          = false
+        panel.ZIndex           = 100
+        panel.ClipsDescendants = true
+        Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 7)
+        do local ps = Instance.new("UIStroke", panel) ps.Color = P.line ps.Thickness = 1 end
+
+        local pScroll = Instance.new("ScrollingFrame", panel)
+        pScroll.Size                   = UDim2.fromScale(1, 1)
+        pScroll.BackgroundTransparency = 1
+        pScroll.BorderSizePixel        = 0
+        pScroll.ScrollBarThickness     = 2
+        pScroll.ScrollBarImageColor3   = P.line
+        pScroll.CanvasSize             = UDim2.fromOffset(0, #FH.EGG_NAMES * 20)
+        pScroll.ZIndex                 = 100
+        Instance.new("UIListLayout", pScroll).SortOrder = Enum.SortOrder.LayoutOrder
+
+        local isOpen  = false
+        local posConn = nil
+        local onSelect = nil
+
+        local function closeDD()
+            isOpen        = false
+            panel.Visible = false
+            dBtn.Text     = "[v]  " .. (currentName or State.selectedEggName)
+            if posConn then posConn:Disconnect() posConn = nil end
+        end
+
+        for i, name in ipairs(FH.EGG_NAMES) do
+            local item = Instance.new("TextButton", pScroll)
+            item.Size                   = UDim2.new(1, 0, 0, 20)
+            item.LayoutOrder            = i
+            item.BackgroundColor3       = P.panel
+            item.BorderSizePixel        = 0
+            item.Text                   = name
+            item.TextColor3             = P.muted
+            item.TextSize               = 8
+            item.Font                   = Enum.Font.Gotham
+            item.TextXAlignment         = Enum.TextXAlignment.Left
+            item.ZIndex                 = 101
+            Instance.new("UIPadding", item).PaddingLeft = UDim.new(0, 10)
+            item.MouseEnter:Connect(function() item.BackgroundColor3 = P.tile end)
+            item.MouseLeave:Connect(function() item.BackgroundColor3 = P.panel end)
+            item.MouseButton1Click:Connect(function()
+                currentName = name
+                dBtn.Text   = "[v]  " .. name
+                if onSelect then onSelect(name, FH.EGG_NAME_TO_KEY[name]) end
+                closeDD()
+            end)
+        end
+
+        dBtn.MouseButton1Click:Connect(function()
+            isOpen        = not isOpen
+            panel.Visible = isOpen
+            dBtn.Text     = (isOpen and "[^]  " or "[v]  ") .. (currentName or State.selectedEggName)
+            if isOpen then
+                local a = dBtn.AbsolutePosition
+                panel.Position = UDim2.fromOffset(a.X, a.Y + 28)
+                if posConn then posConn:Disconnect() end
+                posConn = RunService.RenderStepped:Connect(function()
+                    if not isOpen then posConn:Disconnect() posConn = nil return end
+                    local ab = dBtn.AbsolutePosition
+                    panel.Position = UDim2.fromOffset(ab.X, ab.Y + 28)
+                end)
+            end
+        end)
+
+        return holder, dBtn, function(fn) onSelect = fn end
+    end
+
+    return w
+end
+
+-- ══════════════════════════════════════════
+-- CONSOLE TAB
+-- ══════════════════════════════════════════
+local consoleLbl, consoleAcc, activeModLbl, upRows
+
+local function buildConsole()
+    local C = makeWidgets(pages["console"].content)
+    C.section("Status", P.cyan)
+    consoleLbl, consoleAcc = C.statusBox("Idle")
+    C.gap()
+    C.section("Active", P.cyan)
+    activeModLbl = C.pill("None")
+    C.gap()
+    C.section("Up Next", P.muted)
+    upRows = {}
+    for i = 1, 5 do
+        local _, lk, lv = C.infoRow("-", "-")
+        upRows[i] = {lbl = lk, tl = lv}
+    end
+    C.gap(5)
+    C.section("Debug Log", P.rose)
+    C.gap(2)
+
+    local logFrame = Instance.new("Frame", pages["console"].content)
+    logFrame.Size             = UDim2.new(1, 0, 0, 130)
+    logFrame.BackgroundColor3 = P.card
+    logFrame.BorderSizePixel  = 0
+    logFrame.LayoutOrder      = 200
+    Instance.new("UICorner", logFrame).CornerRadius = UDim.new(0, 6)
+    do local st = Instance.new("UIStroke", logFrame) st.Color = P.line st.Thickness = 1 end
+
+    local logScroll = Instance.new("ScrollingFrame", logFrame)
+    logScroll.Size                   = UDim2.new(1, -4, 1, -4)
+    logScroll.Position               = UDim2.fromOffset(2, 2)
+    logScroll.BackgroundTransparency = 1
+    logScroll.BorderSizePixel        = 0
+    logScroll.ScrollBarThickness     = 2
+    logScroll.ScrollBarImageColor3   = P.line
+    logScroll.AutomaticCanvasSize    = Enum.AutomaticSize.Y
+    logScroll.CanvasSize             = UDim2.fromOffset(0, 0)
+    logScroll.ZIndex                 = 11
+
+    local logLbl = Instance.new("TextLabel", logScroll)
+    logLbl.Size                   = UDim2.new(1, -4, 0, 0)
+    logLbl.AutomaticSize          = Enum.AutomaticSize.Y
+    logLbl.Position               = UDim2.fromOffset(4, 2)
+    logLbl.BackgroundTransparency = 1
+    logLbl.Text                   = "(log empty)"
+    logLbl.TextColor3             = P.muted
+    logLbl.TextSize               = 7
+    logLbl.Font                   = Enum.Font.Code
+    logLbl.TextXAlignment         = Enum.TextXAlignment.Left
+    logLbl.TextWrapped            = true
+    logLbl.ZIndex                 = 11
+
+    local btnRow = Instance.new("Frame", pages["console"].content)
+    btnRow.Size                   = UDim2.new(1, 0, 0, 24)
+    btnRow.BackgroundTransparency = 1
+    btnRow.LayoutOrder            = 201
+    btnRow.BorderSizePixel        = 0
+
+    local copyBtn = Instance.new("TextButton", btnRow)
+    copyBtn.Size                   = UDim2.new(0.48, 0, 1, 0)
+    copyBtn.BackgroundColor3       = P.rose
+    copyBtn.BackgroundTransparency = 0.78
+    copyBtn.BorderSizePixel        = 0
+    copyBtn.Text                   = "[>] Copy Log"
+    copyBtn.TextColor3             = P.txt
+    copyBtn.TextSize               = 8
+    copyBtn.Font                   = Enum.Font.GothamBold
+    Instance.new("UICorner", copyBtn).CornerRadius = UDim.new(0, 5)
+
+    local clearBtn = Instance.new("TextButton", btnRow)
+    clearBtn.Size                   = UDim2.new(0.48, 0, 1, 0)
+    clearBtn.Position               = UDim2.new(0.52, 0, 0, 0)
+    clearBtn.BackgroundColor3       = P.muted
+    clearBtn.BackgroundTransparency = 0.78
+    clearBtn.BorderSizePixel        = 0
+    clearBtn.Text                   = "[x] Clear"
+    clearBtn.TextColor3             = P.txt
+    clearBtn.TextSize               = 8
+    clearBtn.Font                   = Enum.Font.GothamBold
+    Instance.new("UICorner", clearBtn).CornerRadius = UDim.new(0, 5)
+
+    copyBtn.MouseButton1Click:Connect(function()
+        local logText = FH.getLog()
+        pcall(function() setclipboard(logText) end)
+        copyBtn.Text = "[v] Copied!"
+        task.delay(2, function() copyBtn.Text = "[>] Copy Log" end)
+    end)
+    clearBtn.MouseButton1Click:Connect(function()
+        FH.clearLog()
+        logLbl.Text = "(log cleared)"
+    end)
+    task.spawn(function()
+        while task.wait(2) do
+            local txt = FH.getLog()
+            logLbl.Text = (txt ~= "" and txt or "(log empty)")
+            logScroll.CanvasPosition = Vector2.new(0, 0)
+        end
+    end)
+end
+buildConsole()
+
+local function rebuildUpcoming()
+    State.upcoming = {}
+    if not State.hourlyDone then
+        table.insert(State.upcoming, {label="Hourly Quest", timeLeft=0, col=P.sky})
+    else
+        table.insert(State.upcoming, {label="Next Hourly", timeLeft=FH.secsUntilNextHour(), col=P.dim})
+    end
+    if not State.dailyDone then
+        table.insert(State.upcoming, {label="Daily Quest", timeLeft=0, col=P.sky})
+    else
+        table.insert(State.upcoming, {label="Next Daily", timeLeft=FH.secsUntilMidnight(), col=P.dim})
+    end
+    if State.giQuestsDone then
+        table.insert(State.upcoming, {label="G.Inc reset", timeLeft=FH.secsUntilNextHour(), col=P.amber})
+    end
+    if State.shrineRunning and State.shrineNextRun > 0 then
+        local s = math.max(0, State.shrineNextRun - DateTime.now().UnixTimestamp)
+        table.insert(State.upcoming, {label="Next Shrine", timeLeft=s, col=P.rose})
+    end
+end
+
+local function updateConsole()
+    consoleLbl.Text = State.action
+    if State.giRunning and not State.giQuestsDone then
+        consoleLbl.TextColor3 = P.amber    consoleAcc.BackgroundColor3 = P.amber
+    elseif State.riftRunning then
+        consoleLbl.TextColor3 = P.violet   consoleAcc.BackgroundColor3 = P.violet
+    elseif State.obsidianRiftRunning then
+        consoleLbl.TextColor3 = P.obsidian consoleAcc.BackgroundColor3 = P.obsidian
+    elseif State.doodleRiftRunning and State.doodleRiftHatchPos then
+        consoleLbl.TextColor3 = P.doodle   consoleAcc.BackgroundColor3 = P.doodle
+    elseif State.july4thRiftRunning and State.july4thRiftHatchPos then
+        consoleLbl.TextColor3 = P.red      consoleAcc.BackgroundColor3 = P.red
+    elseif State.seasonRunning then
+        consoleLbl.TextColor3 = P.sky      consoleAcc.BackgroundColor3 = P.sky
+    elseif State.hatchRunning then
+        consoleLbl.TextColor3 = P.lime     consoleAcc.BackgroundColor3 = P.lime
+    elseif State.enchanting then
+        consoleLbl.TextColor3 = P.violet   consoleAcc.BackgroundColor3 = P.violet
+    else
+        consoleLbl.TextColor3 = P.muted    consoleAcc.BackgroundColor3 = P.muted
+    end
+
+    local active = {}
+    if State.giRunning            then table.insert(active, "G.Inc")    end
+    if State.riftRunning          then table.insert(active, "Rift")     end
+    if State.obsidianRiftRunning  then table.insert(active, "ObsRift")  end
+    if State.doodleRiftRunning    then table.insert(active, "Doodle")   end
+    if State.july4thRiftRunning   then table.insert(active, "J4Rift")   end
+    if State.seasonRunning        then table.insert(active, "Season")   end
+    if State.hatchRunning         then table.insert(active, "Hatch")    end
+    if State.enchanting           then table.insert(active, "Enchant")  end
+    if State.shrineRunning        then table.insert(active, "Shrine")   end
+    if State.playtimeRunning      then table.insert(active, "Playtime") end
+    if State.prRunning            then table.insert(active, "PRain")    end
+    if State.afkRunning           then table.insert(active, "AFK")      end
+    if State.genieRunning         then table.insert(active, "Genie")    end
+    if State.rebirthRunning       then table.insert(active, "Rebirth")  end
+    if State.carnivalChestRunning then table.insert(active, "Chest")    end
+    if State.pickupRangeRunning   then table.insert(active, "Range")    end
+    if State.claimGIOn            then table.insert(active, "ClaimGI")  end
+    if State.webhookEnabled       then table.insert(active, "Webhook")  end
+
+    activeModLbl.Text       = #active > 0 and table.concat(active, "  |  ") or "None"
+    activeModLbl.TextColor3 = #active > 0 and P.lime or P.dim
+
+    for i, row in ipairs(upRows) do
+        local e = State.upcoming[i]
+        if e then
+            row.lbl.Text       = e.label
+            row.lbl.TextColor3 = e.col or P.muted
+            row.tl.Text        = e.timeLeft > 0 and FH.formatTime(e.timeLeft) or "now"
+            row.tl.TextColor3  = e.timeLeft > 0 and P.muted or P.lime
+        else
+            row.lbl.Text = "-" row.lbl.TextColor3 = P.dim
+            row.tl.Text  = "-" row.tl.TextColor3  = P.dim
+        end
+    end
+end
+
+task.spawn(function()
+    while task.wait(1) do
+        for _, e in ipairs(State.upcoming) do
+            if e.timeLeft > 0 then e.timeLeft -= 1 end
+        end
+        rebuildUpcoming()
+        updateConsole()
+    end
+end)
+
+-- ══════════════════════════════════════════
+-- HATCH TAB
+-- ══════════════════════════════════════════
+local function buildHatch()
+    local H = makeWidgets(pages["hatch"].content)
+    H.section("Egg", P.amber)
+    local _, _, setOnSelect = H.eggDropdown(State.selectedEggName)
+    H.gap()
+    local posStatusLbl = H.note("✓  " .. State.selectedEggName .. " — position ready.", P.lime)
+    H.gap()
+    local savePosBtn = H.actionBtn("[+] Save Position for This Egg", P.amber)
+    H.gap(5)
+    H.section("Options", P.amber)
+    local _, _, setSpamCb = H.toggle("Spam E + R",     State.hatchSpam, P.amber)
+    local _, _, setSkipCb = H.toggle("Skip Animation", State.skipAnim,  P.rose)
+    H.gap(5)
+    H.section("Control", P.lime)
+    local _, getHatchState, setHatchCb, forceHatchToggle = H.toggle("Auto Hatch", State.hatchRunning, P.lime)
+
+    local function refreshPosLabel()
+        if FH.EGG_POSITIONS[State.selectedEggKey] then
+            posStatusLbl.Text       = "✓  " .. State.selectedEggName .. " — position ready."
+            posStatusLbl.TextColor3 = P.lime
+        else
+            posStatusLbl.Text       = "⚠  No position saved — stand at egg and click [+] Save."
+            posStatusLbl.TextColor3 = P.amber
+        end
+    end
+    refreshPosLabel()
+
+    setOnSelect(function(name, key)
+        State.selectedEggName = name
+        State.selectedEggKey  = key
+        refreshPosLabel()
+        if State.hatchRunning then
+            FH.stopHatch() task.wait(0.1) FH.startHatch()
+            if not State.hatchRunning then forceHatchToggle(false) end
+        end
+    end)
+    setSpamCb(function(on) State.hatchSpam = on end)
+    setSkipCb(function(on) State.skipAnim  = on end)
+    savePosBtn.MouseButton1Click:Connect(function()
+        local c = lp.Character if not c then return end
+        local r = c:FindFirstChild("HumanoidRootPart") if not r then return end
+        FH.savePos(State.selectedEggKey, r.Position)
+        savePosBtn.Text = "[v] Saved!"
+        refreshPosLabel()
+        task.delay(2, function() savePosBtn.Text = "[+] Save Position for This Egg" end)
+    end)
+    setHatchCb(function(on)
+        if on then
+            if not FH.EGG_POSITIONS[State.selectedEggKey] then
+                forceHatchToggle(false) return
+            end
+            FH.startHatch()
+        else FH.stopHatch() end
+    end)
+    task.spawn(function()
+        while task.wait(0.5) do
+            if getHatchState() ~= State.hatchRunning then forceHatchToggle(State.hatchRunning) end
+        end
+    end)
+end
+buildHatch()
+
+-- ══════════════════════════════════════════
+-- QUESTS TAB
+-- ══════════════════════════════════════════
+local function buildQuests()
+    local Q = makeWidgets(pages["quests"].content)
+    Q.section("Season", P.sky)
+    local _, _, setSeasonCb = Q.toggle("Auto Season Quests", State.seasonRunning, P.sky)
+    Q.gap(5)
+    Q.section("Hourly", P.sky)
+    local hourlyRows = {}
+    for i = 1, 3 do local _, nl, sl = Q.questRow("Loading...") hourlyRows[i] = {n=nl, s=sl} end
+    local hourlyRstLbl = Q.note("Resets: ...")
+    Q.gap(5)
+    Q.section("Daily", P.sky)
+    local dailyRows = {}
+    for i = 1, 3 do local _, nl, sl = Q.questRow("Loading...") dailyRows[i] = {n=nl, s=sl} end
+    local dailyRstLbl = Q.note("Resets: ...")
+    Q.gap(5)
+    Q.section("Summary", P.muted)
+    local questSumLbl = Q.pill("...")
+    local questPtsLbl = Q.note("Points: ...")
+
+    setSeasonCb(function(on)
+        if on then FH.startSeason() else FH.stopSeason() end
+    end)
+
+    local function getTaskReqLocal(t1)
+        if not t1 then return 0 end
+        if t1.Type == "Collect" then return (t1.Item and t1.Item.Amount) or t1.Amount or 0 end
+        return t1.Amount or 0
+    end
+
+    local function getQE(data, ctype, idx)
+        local id = ("%s-challenge-%d"):format(string.lower(ctype), idx)
+        local ok, QU = pcall(require, game:GetService("ReplicatedStorage").Shared.Utils.Stats.QuestUtil)
+        if ok and QU.FindById then return QU:FindById(data, id) end
+        if data and data.Quests then
+            for _, q in pairs(data.Quests) do
+                if type(q)=="table" and q.Id==id then return q end
+            end
+        end
+    end
+
+    local function fillRows(ctype, rows, rstLbl)
+        local ok, LD = pcall(require, game:GetService("ReplicatedStorage").Client.Framework.Services.LocalData)
+        if not ok then return end
+        local data = LD:Get() if not data then return end
+        local secsH   = 3600  - (DateTime.now().UnixTimestamp % 3600)
+        local secsMid  = 86400 - (DateTime.now().UnixTimestamp % 86400)
+        for i = 1, 3 do
+            local quest = getQE(data, ctype, i)
+            local row   = rows[i]
+            if quest then
+                local prog = (quest.Progress and quest.Progress[1]) or 0
+                local t1   = quest.Tasks and quest.Tasks[1]
+                local req  = getTaskReqLocal(t1)
+                local done = quest.Claimed or (req > 0 and prog >= req)
+                local ok2, QU2 = pcall(require, game:GetService("ReplicatedStorage").Shared.Utils.Stats.QuestUtil)
+                local tstr = t1 and ((ok2 and QU2.FormatTask and QU2:FormatTask(t1)) or (t1.Type or "?").." x"..req) or "Quest #"..i
+                row.n.Text = tstr
+                if done then
+                    row.n.TextColor3 = P.lime row.s.Text = "[v]" row.s.TextColor3 = P.lime
+                else
+                    row.n.TextColor3 = P.muted row.s.Text = prog.."/"..req row.s.TextColor3 = P.amber
+                end
+            else
+                row.n.Text = "-" row.n.TextColor3 = P.dim row.s.Text = ""
+            end
+        end
+        rstLbl.Text = "Resets " .. FH.formatTime(ctype == "Hourly" and secsH or secsMid)
+    end
+
+    local function refreshUI()
+        local ok, LD = pcall(require, game:GetService("ReplicatedStorage").Client.Framework.Services.LocalData)
+        if not ok then return end
+        local data = LD:Get() if not data then return end
+        fillRows("Hourly", hourlyRows, hourlyRstLbl)
+        fillRows("Daily",  dailyRows,  dailyRstLbl)
+        if data.Season then
+            questPtsLbl.Text = "Points: "..tostring(data.Season.Points or 0).."  Lv "..tostring(data.Season.Level or 0)
+        end
+        if State.hourlyDone and State.dailyDone then
+            questSumLbl.Text = "All done!" questSumLbl.TextColor3 = P.lime
+        elseif State.hourlyDone then
+            questSumLbl.Text = "Hourly done" questSumLbl.TextColor3 = P.amber
+        elseif State.dailyDone then
+            questSumLbl.Text = "Daily done" questSumLbl.TextColor3 = P.amber
+        else
+            questSumLbl.Text = "In progress" questSumLbl.TextColor3 = P.muted
+        end
+    end
+    task.spawn(function() while task.wait(5) do refreshUI() end end)
+end
+buildQuests()
+
+-- ══════════════════════════════════════════
+-- GLOBAL INCENTIVE TAB
+-- ══════════════════════════════════════════
+local function buildGI()
+    local GI = makeWidgets(pages["global"].content)
+    GI.section("Bubble Zone", P.teal)
+    local saveBubBtn = GI.actionBtn("[+] Save Current Pos as Bubble Zone", P.teal)
+    GI.gap(5)
+    GI.section("Control", P.lime)
+    local _, _, setGICb, _ = GI.toggle("Global Incentive", State.giRunning, P.lime)
+    GI.gap(5)
+    GI.section("Auto Claim", P.amber)
+    local _, _, setClaimCb = GI.toggle("Auto Claim GI Rewards", State.claimGIOn, P.amber)
+    GI.gap(5)
+    GI.section("Progress", P.muted)
+    local GI_NAMES = {}
+    local pLabels  = {}
+    for i, q in ipairs(FH.GI_QUESTS) do
+        local t = q.Tasks[1]
+        GI_NAMES[i] = (t.Type or "?") .. " x" .. t.Amount
+        pLabels[i]  = GI.note(GI_NAMES[i] .. ": ...")
+    end
+    GI.gap()
+    local giStatusLbl = GI.pill("Running")
+
+    saveBubBtn.MouseButton1Click:Connect(function()
+        local c = lp.Character if not c then return end
+        local r = c:FindFirstChild("HumanoidRootPart") if not r then return end
+        FH.savePos("BubbleZone", r.Position + Vector3.new(0, 1, 0))
+        saveBubBtn.Text = "[v] Saved!"
+        task.delay(2, function() saveBubBtn.Text = "[+] Save Current Pos as Bubble Zone" end)
+    end)
+    setClaimCb(function(on)
+        if on then FH.startClaimGI() else FH.stopClaimGI() end
+        State.claimGIOn = on
+    end)
+    setGICb(function(on)
+        if on then FH.startGI() else FH.stopGI() end
+    end)
+    local function updateLabels()
+        local _, _, _, _, prog = FH.getGINeeds()
+        for i, lbl in ipairs(pLabels) do
+            local p = prog[i]
+            if p then
+                if p.done then
+                    lbl.Text = GI_NAMES[i] .. ": [v]" lbl.TextColor3 = P.lime
+                else
+                    lbl.Text = GI_NAMES[i] .. ": " .. p.prog .. "/" .. p.req .. " (" .. p.pct .. "%)"
+                    lbl.TextColor3 = P.amber
+                end
+            end
+        end
+        giStatusLbl.Text       = State.action
+        giStatusLbl.TextColor3 = State.giRunning and P.amber or P.muted
+    end
+    task.spawn(function() while task.wait(2) do updateLabels() end end)
+end
+buildGI()
+
+-- ══════════════════════════════════════════
+-- GENIE TAB
+-- ══════════════════════════════════════════
+local function buildGenie()
+    local G = makeWidgets(pages["genie"].content)
+    G.section("Gem Genie", P.violet)
+    local genieStatusLbl = G.pill("Off")
+    G.gap(3)
+    local genieCdLbl = G.note("Cooldown: —", P.muted)
+    G.gap(5)
+    G.section("Control", P.lime)
+    local _, getGenieState, setGenieCb, forceGenieToggle = G.toggle("Gem Genie Auto", State.genieRunning, P.lime)
+    G.gap(5)
+    G.section("Mode", P.violet)
+    local _, _, setFirstCb, forceFirstToggle   = G.toggle("Pick First Quest", State.genieMode == "first",  P.sky)
+    G.gap(2)
+    local _, _, setRerollCb, forceRerollToggle = G.toggle("Reroll Until...",  State.genieMode == "reroll", P.violet)
+    G.gap(5)
+    setFirstCb(function(on)
+        if on then State.genieMode = "first"  forceRerollToggle(false)
+        else       State.genieMode = "reroll" forceRerollToggle(true) end
+    end)
+    setRerollCb(function(on)
+        if on then State.genieMode = "reroll" forceFirstToggle(false)
+        else       State.genieMode = "first"  forceFirstToggle(true) end
+    end)
+    G.section("Reroll Target", P.violet)
+    local genieTargetLbl = G.note("Target: " .. (State.genieRerollTarget or "none"), P.violet)
+    G.gap(2)
+
+    local itemListFrame = Instance.new("Frame", pages["genie"].content)
+    itemListFrame.Size             = UDim2.new(1, 0, 0, 120)
+    itemListFrame.BackgroundColor3 = P.card
+    itemListFrame.BorderSizePixel  = 0
+    itemListFrame.LayoutOrder      = 999
+    Instance.new("UICorner", itemListFrame).CornerRadius = UDim.new(0, 6)
+    do local st = Instance.new("UIStroke", itemListFrame) st.Color = P.line st.Thickness = 1 end
+    local itemScroll = Instance.new("ScrollingFrame", itemListFrame)
+    itemScroll.Size                   = UDim2.new(1, -4, 1, -4)
+    itemScroll.Position               = UDim2.fromOffset(2, 2)
+    itemScroll.BackgroundTransparency = 1
+    itemScroll.BorderSizePixel        = 0
+    itemScroll.ScrollBarThickness     = 2
+    itemScroll.ScrollBarImageColor3   = P.line
+    itemScroll.CanvasSize             = UDim2.fromOffset(0, #FH.GENIE_REWARD_ITEMS * 20)
+    itemScroll.ZIndex                 = 11
+    Instance.new("UIListLayout", itemScroll).SortOrder = Enum.SortOrder.LayoutOrder
+
+    local itemBtns = {}
+    for i, itemName in ipairs(FH.GENIE_REWARD_ITEMS) do
+        local btn = Instance.new("TextButton", itemScroll)
+        btn.Size                   = UDim2.new(1, 0, 0, 20)
+        btn.LayoutOrder            = i
+        btn.BackgroundColor3       = (State.genieRerollTarget == itemName) and P.tile or P.panel
+        btn.BorderSizePixel        = 0
+        btn.Text                   = itemName
+        btn.TextColor3             = (State.genieRerollTarget == itemName) and P.violet or P.muted
+        btn.TextSize               = 8
+        btn.Font                   = (State.genieRerollTarget == itemName) and Enum.Font.GothamBold or Enum.Font.Gotham
+        btn.TextXAlignment         = Enum.TextXAlignment.Left
+        btn.ZIndex                 = 12
+        btn.AutoButtonColor        = false
+        Instance.new("UIPadding", btn).PaddingLeft = UDim.new(0, 10)
+        btn.MouseEnter:Connect(function() if State.genieRerollTarget ~= itemName then btn.BackgroundColor3 = P.tile end end)
+        btn.MouseLeave:Connect(function() if State.genieRerollTarget ~= itemName then btn.BackgroundColor3 = P.panel end end)
+        btn.MouseButton1Click:Connect(function()
+            State.genieRerollTarget   = itemName
+            genieTargetLbl.Text       = "Target: " .. itemName
+            genieTargetLbl.TextColor3 = P.violet
+            for _, ob in ipairs(itemBtns) do
+                local sel = (ob.Text == itemName)
+                ob.TextColor3       = sel and P.violet or P.muted
+                ob.Font             = sel and Enum.Font.GothamBold or Enum.Font.Gotham
+                ob.BackgroundColor3 = sel and P.tile or P.panel
+            end
+        end)
+        table.insert(itemBtns, btn)
+    end
+
+    setGenieCb(function(on)
+        if on then FH.startGenie() genieStatusLbl.Text="Running" genieStatusLbl.TextColor3=P.violet
+        else FH.stopGenie() genieStatusLbl.Text="Off" genieStatusLbl.TextColor3=P.muted end
+    end)
+    task.spawn(function()
+        while task.wait(1) do
+            if getGenieState() ~= State.genieRunning then forceGenieToggle(State.genieRunning) end
+            if not State.genieRunning then
+                genieStatusLbl.Text = "Off" genieStatusLbl.TextColor3 = P.muted
+            elseif State.genieQuestActive then
+                genieStatusLbl.Text = State.action genieStatusLbl.TextColor3 = P.violet
+            elseif State.genieQuestDone then
+                genieStatusLbl.Text = "Quest done — waiting cooldown" genieStatusLbl.TextColor3 = P.lime
+            else
+                local s = FH.genieSecsUntilReady()
+                if s > 0 then
+                    genieStatusLbl.Text = "Ready in " .. FH.formatTime(s) genieStatusLbl.TextColor3 = P.amber
+                else
+                    genieStatusLbl.Text = "Genie ready!" genieStatusLbl.TextColor3 = P.lime
+                end
+            end
+            local s2 = FH.genieSecsUntilReady()
+            genieCdLbl.Text       = s2 > 0 and ("Cooldown: " .. FH.formatTime(s2)) or "Cooldown: ready"
+            genieCdLbl.TextColor3 = s2 > 0 and P.amber or P.lime
+        end
+    end)
+end
+buildGenie()
+
+-- ══════════════════════════════════════════
+-- RIFT TAB
+-- ══════════════════════════════════════════
+local function buildRift()
+    local R   = makeWidgets(pages["rift"].content)
+    local rc  = State.riftConfig
+    local orc = State.obsidianRiftConfig
+    local Remote2 = nil
+    pcall(function() Remote2 = require(game:GetService("ReplicatedStorage").Shared.Framework.Network.Remote) end)
+
+    R.section("Rift Egg", P.violet)
+    local _, riftDBtn, setRiftEggSelect = R.eggDropdown(rc.eggName)
+    riftDBtn.TextColor3 = P.violet
+    setRiftEggSelect(function(name, key) rc.eggName=name rc.eggKey=key end)
+    R.gap(4)
+    R.section("Rift Settings", P.violet)
+    local _, timeBox  = R.numInput("Duration slot (1-5)", rc.time or 5)
+    local _, luckBox  = R.numInput("Luck slot (1-5)",     rc.luck or 5)
+    local _, worldBox = R.strInput("World",               rc.world or "The Overworld")
+    R.gap(4)
+    local summonBtn = R.actionBtn("[>] Summon Rift Now", P.violet)
+    R.gap(4)
+    R.section("Auto Rift", P.violet)
+    local _, _, setRiftCb, _ = R.toggle("Auto Rift Hatch", State.riftRunning, P.violet)
+    R.gap()
+    local riftStatusLbl = R.pill("Idle")
+
+    timeBox.FocusLost:Connect(function()
+        rc.time = math.clamp(tonumber(timeBox.Text) or 5, 1, 5) timeBox.Text = tostring(rc.time)
+    end)
+    luckBox.FocusLost:Connect(function()
+        rc.luck = math.clamp(tonumber(luckBox.Text) or 5, 1, 5) luckBox.Text = tostring(rc.luck)
+    end)
+    worldBox.FocusLost:Connect(function()
+        rc.world = worldBox.Text ~= "" and worldBox.Text or "The Overworld"
+    end)
+    summonBtn.MouseButton1Click:Connect(function()
+        if not Remote2 then riftStatusLbl.Text="Remote not ready" riftStatusLbl.TextColor3=P.rose return end
+        riftStatusLbl.Text="Summoning..." riftStatusLbl.TextColor3=P.amber
+        task.spawn(function()
+            local ok, result = pcall(function()
+                return Remote2:InvokeServer("SummonRift", {
+                    Type="Egg", World=rc.world or "The Overworld", Name=rc.eggName,
+                    Time=math.clamp(rc.time or 5,1,5), Luck=math.clamp(rc.luck or 5,1,5),
+                })
+            end)
+            if ok and result then riftStatusLbl.Text="Summoned!" riftStatusLbl.TextColor3=P.lime
+            else riftStatusLbl.Text="Failed" riftStatusLbl.TextColor3=P.rose end
+        end)
+    end)
+    setRiftCb(function(on)
+        if on then FH.startRift() riftStatusLbl.Text="Running" riftStatusLbl.TextColor3=P.violet
+        else FH.stopRift() riftStatusLbl.Text="Stopped" riftStatusLbl.TextColor3=P.muted end
+    end)
+
+    R.gap(8)
+    R.section("Obsidian Rift Egg", P.obsidian)
+    local _, obsRiftDBtn, setObsRiftEggSelect = R.eggDropdown(orc.eggName)
+    obsRiftDBtn.TextColor3 = P.obsidian
+    setObsRiftEggSelect(function(name, key) orc.eggName=name orc.eggKey=key end)
+    R.gap(4)
+    R.section("Obsidian Rift Settings", P.obsidian)
+    local _, obsTimeBox = R.numInput("Duration slot (1-5)", orc.time or 5)
+    local _, obsLuckBox = R.numInput("Luck slot (1-5)",     orc.luck or 5)
+    R.gap(4)
+    local obsSummonBtn = R.actionBtn("[>] Summon Obsidian Rift Now", P.obsidian)
+    R.gap(4)
+    R.section("Auto Obsidian Rift", P.obsidian)
+    local _, getObsRiftState, setObsRiftCb, forceObsRiftToggle = R.toggle("Auto Hatch Obsidian Rift", State.obsidianRiftRunning, P.obsidian)
+    R.gap()
+    local obsRiftStatusLbl = R.pill("Idle")
+    local obsExistsLbl     = R.note("Rift in workspace: checking...", P.muted)
+
+    obsTimeBox.FocusLost:Connect(function()
+        orc.time = math.clamp(tonumber(obsTimeBox.Text) or 5, 1, 5) obsTimeBox.Text = tostring(orc.time)
+    end)
+    obsLuckBox.FocusLost:Connect(function()
+        orc.luck = math.clamp(tonumber(obsLuckBox.Text) or 5, 1, 5) obsLuckBox.Text = tostring(orc.luck)
+    end)
+    obsSummonBtn.MouseButton1Click:Connect(function()
+        if not Remote2 then return end
+        obsRiftStatusLbl.Text="Summoning..." obsRiftStatusLbl.TextColor3=P.amber
+        task.spawn(function()
+            local ok, result = pcall(function()
+                return Remote2:InvokeServer("SummonMoonRift", {Type="Egg", Time=math.clamp(orc.time or 5,1,5), Luck=math.clamp(orc.luck or 5,1,5)})
+            end)
+            if ok and result then obsRiftStatusLbl.Text="Summoned!" obsRiftStatusLbl.TextColor3=P.lime
+            else obsRiftStatusLbl.Text="Failed" obsRiftStatusLbl.TextColor3=P.rose end
+        end)
+    end)
+    setObsRiftCb(function(on)
+        if on then FH.startObsidianRift() obsRiftStatusLbl.Text="Running" obsRiftStatusLbl.TextColor3=P.obsidian
+        else FH.stopObsidianRift() obsRiftStatusLbl.Text="Stopped" obsRiftStatusLbl.TextColor3=P.muted end
+    end)
+    task.spawn(function()
+        while task.wait(1) do
+            if getObsRiftState() ~= State.obsidianRiftRunning then forceObsRiftToggle(State.obsidianRiftRunning) end
+            if State.obsidianRiftRunning then obsRiftStatusLbl.Text=State.action obsRiftStatusLbl.TextColor3=P.obsidian end
+            local exists = FH.obsidianRiftExistsNow and FH.obsidianRiftExistsNow()
+            obsExistsLbl.Text       = exists and "Rift in workspace: ✓ active" or "Rift in workspace: — none"
+            obsExistsLbl.TextColor3 = exists and P.lime or P.muted
+        end
+    end)
+end
+buildRift()
+
+-- ══════════════════════════════════════════
+-- REBIRTH MACHINE TAB (new in v17)
+-- ══════════════════════════════════════════
+local function buildRebirth()
+    local RB = makeWidgets(pages["rebirth"].content)
+
+    RB.section("Rebirth Machine", P.rebirth)
+    RB.note("Converts 5x matching Secret pets into a random Secret.", P.muted)
+    RB.note("Skips locked, XL, and team-equipped pets.", P.dim)
+    RB.gap(5)
+
+    RB.section("Pet Name", P.rebirth)
+    local _, petNameBox = RB.strInput("Pet Name", State.rebirthConfig.petName or "Hyperwave Doggy")
+    RB.gap(3)
+    local applyPetBtn = RB.actionBtn("[>] Apply Pet Name", P.rebirth)
+    RB.gap(5)
+
+    RB.section("Status", P.rebirth)
+    local rebirthStatusLbl = RB.pill("Off")
+    RB.gap(3)
+    local rebirthCountLbl  = RB.note("Found: checking...", P.muted)
+    RB.gap(3)
+    local rebirthLastLbl   = RB.note("Last result: —", P.dim)
+    RB.gap(5)
+
+    RB.section("Control", P.lime)
+    local _, getRebirthState, setRebirthCb, forceRebirthToggle = RB.toggle("Auto Rebirth Machine", State.rebirthRunning, P.lime)
+    RB.gap(3)
+    RB.note("Will only fire when exactly 5+ matching pets are available.", P.dim)
+    RB.gap(5)
+
+    RB.section("Manual", P.rebirth)
+    local fireOnceBtn = RB.actionBtn("[>] Fire Once Now", P.rebirth)
+
+    applyPetBtn.MouseButton1Click:Connect(function()
+        local name = petNameBox.Text:match("^%s*(.-)%s*$")
+        if name and name ~= "" then
+            State.rebirthConfig.petName = name
+            applyPetBtn.Text = "[v] Applied!"
+            task.delay(2, function() applyPetBtn.Text = "[>] Apply Pet Name" end)
+        end
+    end)
+
+    setRebirthCb(function(on)
+        if on then
+            FH.startRebirthMachine()
+            rebirthStatusLbl.Text       = "Running"
+            rebirthStatusLbl.TextColor3 = P.rebirth
+        else
+            FH.stopRebirthMachine()
+            rebirthStatusLbl.Text       = "Off"
+            rebirthStatusLbl.TextColor3 = P.muted
+        end
+    end)
+
+    fireOnceBtn.MouseButton1Click:Connect(function()
+        local petName = State.rebirthConfig.petName
+        local pets    = FH.getRebirthPets(petName)
+        if not pets then
+            fireOnceBtn.Text = "Not enough pets!"
+            task.delay(2, function() fireOnceBtn.Text = "[>] Fire Once Now" end)
+            return
+        end
+        local ids = {}
+        for _, p in ipairs(pets) do table.insert(ids, p.Id) end
+        fireOnceBtn.Text = "Converting..."
+        task.spawn(function()
+            local ok, LD = pcall(require, game:GetService("ReplicatedStorage").Client.Framework.Services.LocalData)
+            if not ok then fireOnceBtn.Text = "Error" task.delay(2, function() fireOnceBtn.Text = "[>] Fire Once Now" end) return end
+            local Remote2 = nil
+            pcall(function() Remote2 = require(game:GetService("ReplicatedStorage").Shared.Framework.Network.Remote) end)
+            if not Remote2 then fireOnceBtn.Text = "No Remote" task.delay(2, function() fireOnceBtn.Text = "[>] Fire Once Now" end) return end
+            local ok2, result = pcall(function() return Remote2:InvokeServer("UseRebirthMachine", ids) end)
+            if ok2 and result then
+                local variantName = result.Mythic and result.Shiny and "Shiny Mythic" or result.Mythic and "Mythic" or result.Shiny and "Shiny" or "Normal"
+                local gotName = (result.Name or "?").." ("..variantName..")"
+                rebirthLastLbl.Text       = "Last result: "..gotName
+                rebirthLastLbl.TextColor3 = P.lime
+                fireOnceBtn.Text = "[v] Got "..gotName.."!"
+            else
+                rebirthLastLbl.Text       = "Last result: nil/error"
+                rebirthLastLbl.TextColor3 = P.rose
+                fireOnceBtn.Text = "Failed/cooldown"
+            end
+            task.delay(3, function() fireOnceBtn.Text = "[>] Fire Once Now" end)
+        end)
+    end)
+
+    -- Sync toggle + status
+    task.spawn(function()
+        while task.wait(1) do
+            if getRebirthState() ~= State.rebirthRunning then forceRebirthToggle(State.rebirthRunning) end
+            if State.rebirthRunning then
+                rebirthStatusLbl.Text       = State.action
+                rebirthStatusLbl.TextColor3 = P.rebirth
+            end
+            -- Count matching pets
+            local count = 0
+            local ok, LD = pcall(require, game:GetService("ReplicatedStorage").Client.Framework.Services.LocalData)
+            if ok then
+                local data = LD:Get()
+                if data and data.Pets then
+                    local petName = State.rebirthConfig.petName
+                    for _, p in ipairs(data.Pets) do
+                        if p.Name == petName then count += 1 end
+                    end
+                end
+            end
+            local petName = State.rebirthConfig.petName
+            local eligible = FH.getRebirthPets and FH.getRebirthPets(petName)
+            local eligCount = eligible and #eligible or 0
+            rebirthCountLbl.Text       = "Found: "..count.." total, "..eligCount.." eligible (need 5)"
+            rebirthCountLbl.TextColor3 = eligCount >= 5 and P.lime or P.amber
+        end
+    end)
+end
+buildRebirth()
+
+-- ══════════════════════════════════════════
+-- ENCHANT TAB
+-- ══════════════════════════════════════════
+local function buildEnchant()
+    local EN = makeWidgets(pages["enchant"].content)
+    EN.section("Enchant Targets", P.violet)
+    EN.note("Exact enchant IDs (max 2)", P.muted)
+    EN.gap(4)
+    local _, box1 = EN.strInput("Target 1", State.enchantTargets[1] or "determination")
+    local _, box2 = EN.strInput("Target 2", State.enchantTargets[2] or "looter")
+    local applyBtn = EN.actionBtn("[>] Apply Targets", P.violet)
+    applyBtn.MouseButton1Click:Connect(function()
+        local t = {}
+        for _, b in ipairs({box1, box2}) do
+            local v = b.Text:match("^%s*(.-)%s*$")
+            if v and v ~= "" then table.insert(t, v) end
+        end
+        if #t > 0 then
+            State.enchantTargets = t
+            applyBtn.Text = "[v] Applied!"
+            task.delay(2, function() applyBtn.Text = "[>] Apply Targets" end)
+        end
+    end)
+    EN.gap(5)
+    EN.section("Reroll Currency", P.amber)
+    EN.note("Used for normal rerolls (not Shadow Crystal)", P.muted)
+    EN.gap(3)
+    local _, currencyBox = EN.strInput("Currency", State.enchantCurrency or "Gems")
+    currencyBox.FocusLost:Connect(function()
+        local v = currencyBox.Text:match("^%s*(.-)%s*$")
+        if v and v ~= "" then State.enchantCurrency = v
+        else currencyBox.Text = State.enchantCurrency or "Gems" end
+    end)
+    EN.gap(5)
+    EN.section("Control", P.violet)
+    local _, _, setEnchCb = EN.toggle("Auto Enchant", State.enchanting, P.violet)
+    EN.gap()
+    local enchLbl = EN.pill("Idle")
+    setEnchCb(function(on)
+        if on then FH.startEnchant() enchLbl.Text="Running" enchLbl.TextColor3=P.violet
+        else FH.stopEnchant() enchLbl.Text="Stopped" enchLbl.TextColor3=P.muted end
+    end)
+    task.spawn(function()
+        while task.wait(1) do
+            if State.enchanting then enchLbl.Text=State.action enchLbl.TextColor3=P.violet end
+        end
+    end)
+end
+buildEnchant()
+
+-- ══════════════════════════════════════════
+-- SHRINE TAB
+-- ══════════════════════════════════════════
+local function buildShrine()
+    local SH = makeWidgets(pages["shrine"].content)
+    local ss  = State.shrineSettings
+    local Remote2 = nil
+    pcall(function() Remote2 = require(game:GetService("ReplicatedStorage").Shared.Framework.Network.Remote) end)
+
+    SH.section("Bubble Shrine", P.teal)
+    local _, bubLvlBox  = SH.numInput("Level",  ss.bubbleLevel)
+    local _, bubAmtBox  = SH.numInput("Amount", ss.bubbleAmount)
+    local _, bubNameBox = SH.strInput("Name",   ss.bubbleName)
+    local _, bubTypeBox = SH.strInput("Type",   ss.bubbleType)
+    SH.gap(4)
+    SH.section("Dreamer Shrine", P.violet)
+    local _, dreamerBox = SH.numInput("Amount", ss.dreamerAmount)
+    SH.gap(4)
+    SH.section("Permanent Shrine", P.amber)
+    local _, permLuckBox = SH.numInput("Luck Level", ss.permShrineLuck)
+    local _, permAmtBox  = SH.numInput("Amount",     ss.permShrineAmount)
+    local _, permEggBox  = SH.strInput("Egg Name",   ss.permShrineEgg)
+    SH.gap(4)
+    SH.section("Schedule", P.muted)
+    local _, intervalBox = SH.numInput("Interval (s)", ss.interval)
+    SH.gap(4)
+    local fireNowBtn = SH.actionBtn("[>] Fire All Shrines Now", P.amber)
+    SH.gap(4)
+    SH.section("Auto Mode", P.rose)
+    local _, _, setShrineCb = SH.toggle("Auto Shrine", State.shrineRunning, P.rose)
+    SH.gap()
+    local shrineLbl = SH.pill("Idle")
+
+    local function readAndApply()
+        ss.bubbleLevel      = tonumber(bubLvlBox.Text)  or 1
+        ss.bubbleAmount     = tonumber(bubAmtBox.Text)   or 500
+        ss.bubbleName       = bubNameBox.Text ~= "" and bubNameBox.Text or "Lucky"
+        ss.bubbleType       = bubTypeBox.Text ~= "" and bubTypeBox.Text or "Potion"
+        ss.dreamerAmount    = tonumber(dreamerBox.Text)  or 15
+        ss.permShrineLuck   = tonumber(permLuckBox.Text) or 6
+        ss.permShrineAmount = tonumber(permAmtBox.Text)  or 400
+        ss.permShrineEgg    = permEggBox.Text ~= "" and permEggBox.Text or "Common Egg"
+        ss.interval         = tonumber(intervalBox.Text) or 43200
+    end
+    for _, box in ipairs({bubLvlBox,bubAmtBox,dreamerBox,permLuckBox,permAmtBox,intervalBox,bubNameBox,bubTypeBox,permEggBox}) do
+        box.FocusLost:Connect(readAndApply)
+    end
+    fireNowBtn.MouseButton1Click:Connect(function()
+        readAndApply()
+        shrineLbl.Text="Firing..." shrineLbl.TextColor3=P.amber
+        task.spawn(function()
+            FH.fireAllShrines()
+            shrineLbl.Text="Done" shrineLbl.TextColor3=P.lime
+        end)
+    end)
+    setShrineCb(function(on)
+        readAndApply()
+        if on then FH.startShrine() shrineLbl.Text="Running" shrineLbl.TextColor3=P.rose
+        else FH.stopShrine() shrineLbl.Text="Stopped" shrineLbl.TextColor3=P.muted end
+    end)
+    task.spawn(function()
+        while task.wait(5) do
+            if State.shrineRunning and State.shrineNextRun > 0 then
+                local left = math.max(0, State.shrineNextRun - DateTime.now().UnixTimestamp)
+                shrineLbl.Text="Next in "..FH.formatTime(left) shrineLbl.TextColor3=P.rose
+            end
+        end
+    end)
+end
+buildShrine()
+
+-- ══════════════════════════════════════════
+-- EVENT TAB (v17: Doodle Rift added above July 4th)
+-- ══════════════════════════════════════════
+local function buildEvent()
+    local EV = makeWidgets(pages["event"].content)
+
+    -- ── Doodle Rift (NEW) ─────────────────
+    EV.section("Doodle Rift", P.doodle)
+    EV.note("Polls every 30s for 'doodle-rift' in workspace", P.muted)
+    EV.note("Passive detection only — never summons", P.dim)
+    EV.note("Priority: above July 4th Rift, below Obsidian Rift", P.dim)
+    EV.gap(3)
+    local _, getDoodleState, setDoodleCb, forceDoodleToggle = EV.toggle(
+        "Auto Hatch Doodle Rift",
+        State.doodleRiftRunning,
+        P.doodle
+    )
+    EV.gap(2)
+    local doodleStatusLbl = EV.pill(State.doodleRiftRunning and "Polling..." or "Off")
+    if State.doodleRiftRunning then doodleStatusLbl.TextColor3 = P.amber end
+    EV.gap(5)
+
+    setDoodleCb(function(on)
+        if on then
+            FH.startDoodleRift()
+            doodleStatusLbl.Text       = "Polling..."
+            doodleStatusLbl.TextColor3 = P.amber
+        else
+            FH.stopDoodleRift()
+            doodleStatusLbl.Text       = "Off"
+            doodleStatusLbl.TextColor3 = P.muted
+        end
+    end)
+
+    task.spawn(function()
+        while task.wait(1) do
+            if getDoodleState() ~= State.doodleRiftRunning then forceDoodleToggle(State.doodleRiftRunning) end
+            if not State.doodleRiftRunning then
+                doodleStatusLbl.Text       = "Off"
+                doodleStatusLbl.TextColor3 = P.muted
+            elseif State.doodleRiftHatchPos ~= nil then
+                doodleStatusLbl.Text       = State.action
+                doodleStatusLbl.TextColor3 = P.doodle
+            else
+                doodleStatusLbl.Text       = "Polling — no rift detected"
+                doodleStatusLbl.TextColor3 = P.amber
+            end
+        end
+    end)
+
+    -- ── July 4th Rift ─────────────────────
+    EV.section("July 4th Rift", P.red)
+    EV.note("Polls every 30s for july4th-rift-3 slug", P.muted)
+    EV.note("Passive detection only — never summons", P.dim)
+    EV.gap(3)
+    local _, getJ4State, setJ4Cb, forceJ4Toggle = EV.toggle(
+        "Auto Hatch July 4th Rift",
+        State.july4thRiftRunning,
+        P.red
+    )
+    EV.gap(2)
+    local j4StatusLbl = EV.pill(State.july4thRiftRunning and "Polling..." or "Off")
+    if State.july4thRiftRunning then j4StatusLbl.TextColor3 = P.amber end
+    EV.gap(5)
+
+    setJ4Cb(function(on)
+        if on then
+            FH.startJuly4thRift()
+            j4StatusLbl.Text       = "Polling..."
+            j4StatusLbl.TextColor3 = P.amber
+        else
+            FH.stopJuly4thRift()
+            j4StatusLbl.Text       = "Off"
+            j4StatusLbl.TextColor3 = P.muted
+        end
+    end)
+
+    task.spawn(function()
+        while task.wait(1) do
+            if getJ4State() ~= State.july4thRiftRunning then forceJ4Toggle(State.july4thRiftRunning) end
+            if not State.july4thRiftRunning then
+                j4StatusLbl.Text       = "Off"
+                j4StatusLbl.TextColor3 = P.muted
+            elseif State.july4thRiftHatchPos ~= nil then
+                j4StatusLbl.Text       = State.action
+                j4StatusLbl.TextColor3 = P.red
+            else
+                j4StatusLbl.Text       = "Polling — no rift detected"
+                j4StatusLbl.TextColor3 = P.amber
+            end
+        end
+    end)
+
+    -- ── Carnival Chest ────────────────────
+    EV.section("Carnival Chest", P.gold)
+    local _, _, setChestCb = EV.toggle("Auto Claim Carnival Chest", State.carnivalChestRunning, P.gold)
+    EV.gap(2)
+    local _, chestIntervalBox = EV.numInput("Interval (s)", State.carnivalChestInterval or 30)
+    chestIntervalBox.FocusLost:Connect(function()
+        local v = math.max(5, tonumber(chestIntervalBox.Text) or 30)
+        State.carnivalChestInterval = v
+        chestIntervalBox.Text = tostring(v)
+    end)
+    EV.gap(5)
+
+    setChestCb(function(on)
+        if on then FH.startCarnivalChest() else FH.stopCarnivalChest() end
+    end)
+end
+buildEvent()
+
+-- ══════════════════════════════════════════
+-- MISC TAB
+-- ══════════════════════════════════════════
+local function buildMisc()
+    local MS = makeWidgets(pages["misc"].content)
+
+    MS.section("Auto Pickup Range", P.teal)
+    MS.note("Patches pickup range to a fixed stud distance", P.muted)
+    MS.gap(3)
+    local _, _, setRangeCb = MS.toggle("Auto Pickup Range", State.pickupRangeRunning, P.teal)
+    MS.gap(2)
+    local rangeStatusLbl = MS.note(
+        State.pickupRangeRunning and ("Active — "..tostring(State.pickupRangeStuds or 250).." studs") or "Disabled",
+        State.pickupRangeRunning and P.lime or P.dim
+    )
+    MS.gap(5)
+
+    MS.section("Anti AFK", P.teal)
+    local _, _, setAFKCb = MS.toggle("Anti AFK", State.afkRunning, P.teal)
+    MS.gap(5)
+
+    MS.section("Auto Playtime", P.teal)
+    local _, _, setPTCb = MS.toggle("Auto Playtime", State.playtimeRunning, P.teal)
+    MS.gap(5)
+
+    MS.section("Auto Present Rain", P.amber)
+    local _, _, setPRCb = MS.toggle("Auto Present Rain", State.prRunning, P.amber)
+    local prCountLbl    = MS.note("Collected: 0")
+    MS.gap(5)
+
+    MS.section("Secret Pet Webhook", P.rose)
+    local _, _, setWebhookCb = MS.toggle("Enable Webhook Alerts", State.webhookEnabled, P.rose)
+    MS.gap(3)
+    local _, webhookBox = MS.strInput("Webhook URL", State.webhookUrl or "")
+    MS.gap(3)
+    local testBtn       = MS.actionBtn("[>] Send Test Alert", P.rose)
+    MS.gap(2)
+    local webhookStatus = MS.note(State.webhookEnabled and "Status: listening for secrets..." or "Status: disabled")
+    if State.webhookEnabled then webhookStatus.TextColor3 = P.lime end
+
+    setRangeCb(function(on)
+        if on then
+            FH.startPickupRange()
+            rangeStatusLbl.Text       = "Active — "..tostring(State.pickupRangeStuds or 250).." studs"
+            rangeStatusLbl.TextColor3 = P.lime
+        else
+            FH.stopPickupRange()
+            rangeStatusLbl.Text       = "Disabled"
+            rangeStatusLbl.TextColor3 = P.dim
+        end
+    end)
+    setAFKCb(function(on) if on then FH.startAFK() else FH.stopAFK() end end)
+    setPTCb(function(on) if on then FH.startPlaytime() else FH.stopPlaytime() end end)
+    setPRCb(function(on) if on then FH.startPresentRain() else FH.stopPresentRain() end end)
+    setWebhookCb(function(on)
+        State.webhookEnabled     = on
+        webhookStatus.Text       = on and "Status: listening for secrets..." or "Status: disabled"
+        webhookStatus.TextColor3 = on and P.lime or P.dim
+    end)
+    webhookBox.FocusLost:Connect(function()
+        if webhookBox.Text ~= "" then State.webhookUrl = webhookBox.Text end
+    end)
+    testBtn.MouseButton1Click:Connect(function()
+        local url = webhookBox.Text ~= "" and webhookBox.Text or State.webhookUrl
+        if not url or url == "" then
+            webhookStatus.Text="Status: no URL set!" webhookStatus.TextColor3=P.rose return
+        end
+        State.webhookUrl         = url
+        webhookStatus.Text       = "Status: sending test..."
+        webhookStatus.TextColor3 = P.amber
+        task.spawn(function()
+            local ok, err = FH.sendWebhookEmbed("Test Pet", "Shiny ", true)
+            if ok then
+                webhookStatus.Text="Status: test sent!" webhookStatus.TextColor3=P.lime
+                task.delay(4, function()
+                    webhookStatus.Text       = State.webhookEnabled and "Status: listening..." or "Status: disabled"
+                    webhookStatus.TextColor3 = State.webhookEnabled and P.lime or P.dim
+                end)
+            else
+                webhookStatus.Text="Status: failed — "..tostring(err or "?"):sub(1,28)
+                webhookStatus.TextColor3=P.rose
+            end
+        end)
+    end)
+    task.spawn(function()
+        while task.wait(1) do prCountLbl.Text = "Collected: " .. State.prCount end
+    end)
+end
+buildMisc()
+
+-- ══════════════════════════════════════════
+-- INIT
+-- ══════════════════════════════════════════
+setTab("console")
+rebuildUpcoming()
+updateConsole()
+
+print("[FlookHub] UI v17 loaded  |  Ctrl = show/hide")
+print("[FlookHub] v17: Rebirth Machine tab added (default: Hyperwave Doggy)")
+print("[FlookHub] v17: Doodle Rift added in Event tab (above July 4th Rift)")
+print("[FlookHub] v17: Blacklist fix — Pearls+Tickets both reliably skipped")
