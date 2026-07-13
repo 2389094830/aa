@@ -102,7 +102,7 @@ local State = {
     hatchSpam           = true,
     skipAnim            = true,
     webhookEnabled      = true,
-    webhookUrl          = "https://discord.com/api/webhooks/1496536287123996803/Fzl4UjV-WaHLGtK6j09SfCNN-zCJ0Xc6qkgZ1MthG7dhj0UdUpu-ZIQmuBKKHn7zzPu2",
+    webhookUrl          = "https://discord.com/api/webhooks/1496660540406239364/ENdYLsw0YBxyxYshZz1ZmMgNW0gRzF-NDWCDfpRvGdKeKnFuriWylNQhgNPIxFiHNOKJ",
 
     -- Misc
     pickupRangeRunning  = true,
