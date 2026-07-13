@@ -1,0 +1,2023 @@
+-- FLOOK HUB CORE v17
+-- Execute FIRST, then UI.
+--
+-- ═══ TP LOGIC NOTE FOR FUTURE PROMPTS ═══
+-- tp(), ensureAt(), giBlocking(), seasonBlocking(), riftActive(), genieBlocking(),
+-- runHatchLoop, runGILoop, runRiftLoop, runSeasonLoop, and the RESPAWN handler
+-- must NEVER be changed unless explicitly asked. Only EGG_POSITIONS, EGG_NAMES,
+-- State defaults, doHatchQuest rarity routing, and new feature loops may be added.
+-- All eggs in EGG_POSITIONS have real coordinates — startHatch() is safe to auto-start.
+-- ═══════════════════════════════════════
+--
+-- ═══ v17 CHANGELOG ═══
+-- 1. Blacklist fix: isBlacklistedTask() and resolveQuestAction() now directly
+--    check cur == "Pearls" or cur == "Tickets" — no table lookup needed.
+--    Both season AND genie skip these tasks/slots reliably.
+-- 2. Doodle Rift added (slug: "doodle-rift").
+--    Priority: GI > Season > DoodleRift > July4thRift > Hatch/etc.
+--    Same passive detection pattern as July 4th Rift.
+--    State.doodleRiftRunning default: true
+-- 3. Rebirth Machine added.
+--    State.rebirthConfig: { petName="Hyperwave Doggy", autoRebirth=false }
+--    startRebirthMachine() fires "UseRebirthMachine" with 5 matching pets.
+--    Scans LocalData.Pets for non-locked, non-XL, non-team Secret pets matching petName.
+--    Only fires if exactly 5 found. Loops with 3s cooldown between attempts.
+-- ═══════════════════════════════════════
+--
+-- PRIORITY ORDER:
+--   1. Global Incentive   (giBlocking)
+--   2. Season Quests      (seasonBlocking)
+--   3. Gem Genie quest    (genieBlocking — only while actively doing tasks)
+--   4. Doodle Rift        (doodleRiftBlocking — only once a platform is locked)
+--   5. Obsidian Rift      (obsidianRiftBlocking — only once a platform is locked)
+--   6. July 4th Rift      (july4thRiftBlocking)
+--   7. Hatch / Rift / Enchant / Event / etc.
+--
+-- QUEST BLACKLIST: Pearls + Tickets → skipped (slot avoided + task treated as done)
+
+local Players             = game:GetService("Players")
+local ReplicatedStorage   = game:GetService("ReplicatedStorage")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local HttpService         = game:GetService("HttpService")
+
+local lp        = Players.LocalPlayer
+local character = lp.Character or lp.CharacterAdded:Wait()
+
+local function safeReq(...)
+    local obj = ReplicatedStorage
+    for _, part in ipairs({...}) do
+        local ok, res = pcall(function() return obj:WaitForChild(part, 10) end)
+        if not ok or not res then return nil end
+        obj = res
+    end
+    local ok2, res2 = pcall(require, obj)
+    return ok2 and res2 or nil
+end
+
+local QuestUtil           = safeReq("Shared","Utils","Stats","QuestUtil")
+local GlobalIncentiveUtil = safeReq("Shared","Utils","GlobalIncentiveUtil")
+local LocalData           = safeReq("Client","Framework","Services","LocalData")
+local Remote              = safeReq("Shared","Framework","Network","Remote")
+local PetData             = safeReq("Shared","Data","Pets")
+local GenieQuest          = safeReq("Shared","Data","Quests","GenieQuest")
+local StatsUtil           = safeReq("Shared","Utils","Stats","StatsUtil")
+local RebirthMachineUtil  = safeReq("Shared","Utils","RebirthMachineUtil")
+
+if not QuestUtil or not GlobalIncentiveUtil or not LocalData or not Remote or not PetData then
+    warn("[FH] Critical module missing — aborting.") return
+end
+
+-- ══════════════════════════════════════════
+-- LOG
+-- ══════════════════════════════════════════
+local debugLog = {}
+local function log(cat, msg)
+    local e = string.format("[%s][%s] %s", os.date("!%H:%M:%S"), cat, tostring(msg))
+    table.insert(debugLog, 1, e)
+    if #debugLog > 400 then table.remove(debugLog) end
+    if cat == "TP" or cat == "STATE" or cat == "GUARD" or cat == "RESPAWN"
+    or cat == "ANCHOR" or cat == "MISC" or cat == "J4RIFT" or cat == "GENIE"
+    or cat == "DOODLE" or cat == "REBIRTH" then
+        print(e)
+    end
+end
+local function getLog()   return table.concat(debugLog, "\n") end
+local function clearLog() debugLog = {} end
+
+-- ══════════════════════════════════════════
+-- STATE
+-- ══════════════════════════════════════════
+local State = {
+    giRunning           = false,
+    seasonRunning       = true,
+    hatchRunning        = true,
+    riftRunning         = false,
+    obsidianRiftRunning = false,
+    enchanting          = true,
+    shrineRunning       = false,
+    playtimeRunning     = true,
+    prRunning           = true,
+    afkRunning          = true,
+    claimGIOn           = true,
+    hatchSpam           = true,
+    skipAnim            = true,
+    webhookEnabled      = true,
+    webhookUrl          = "https://discord.com/api/webhooks/1496536287123996803/Fzl4UjV-WaHLGtK6j09SfCNN-zCJ0Xc6qkgZ1MthG7dhj0UdUpu-ZIQmuBKKHn7zzPu2",
+
+    -- Misc
+    pickupRangeRunning  = true,
+    pickupRangeStuds    = 250,
+
+    -- Event
+    carnivalChestRunning    = true,
+    carnivalChestInterval   = 30,
+    carnivalRebirthRunning  = true,
+    carnivalRebirthInterval = 5,
+    carnivalCoinTpRunning   = false,
+
+    -- July 4th Rift
+    july4thRiftRunning  = true,
+    july4thRiftHatchPos = nil,
+    july4thRiftSlugs    = {"july4th-rift-3"},
+
+    -- Doodle Rift
+    doodleRiftRunning  = true,
+    doodleRiftHatchPos = nil,
+    doodleRiftSlug     = "doodle-rift",
+
+    -- Gem Genie
+    genieRunning      = false,
+    genieMode         = "reroll",
+    genieRerollTarget = "Shadow Crystal",
+    genieQuestActive  = false,
+    genieQuestDone    = false,
+
+    -- Rebirth Machine
+    rebirthConfig = {
+        petName     = "Hyperwave Doggy",
+        autoRebirth = true,
+    },
+    rebirthRunning   = true,
+    rebirthLastCount = 0,
+
+    giMode       = "idle",
+    giOldSeed    = nil,
+    giQuestsDone = false,
+    lastTpKey    = nil,
+    lastTpTime   = 0,
+
+    selectedEggName = "Plushie Egg",
+    selectedEggKey  = "PlushieEgg",
+
+    hourlyDone = false, dailyDone = false,
+    hourlyDet  = {},    dailyDet  = {},
+
+    action  = "Idle",
+    prCount = 0,
+    prConn  = nil,
+
+    enchantTargets  = {"secret-hunter","ultra-roller"},
+    enchantCurrency = "Gems",
+
+    riftConfig = {
+        eggName = "Cyber Egg",
+        eggKey  = "CyberEgg",
+        world   = "Minigame Paradise",
+        time    = 5,
+        luck    = 5,
+    },
+    riftHatchPos    = nil,
+    riftExpireTime  = 0,
+    riftSpawnHeight = nil,
+
+    obsidianRiftConfig = {
+        eggName = "Crystal Egg",
+        eggKey  = "CrystalEgg",
+        world   = "The Overworld",
+        time    = 5,
+        luck    = 5,
+    },
+    obsidianRiftHatchPos    = nil,
+    obsidianRiftExpireTime  = 0,
+    obsidianRiftSpawnHeight = nil,
+
+    shrineSettings = {
+        bubbleLevel=1, bubbleType="Potion", bubbleName="Lucky", bubbleAmount=500,
+        dreamerAmount=15, permShrineLuck=6, permShrineAmount=400,
+        permShrineEgg="Common Egg", interval=43200,
+    },
+    shrineNextRun = 0,
+    upcoming      = {},
+}
+
+-- ══════════════════════════════════════════
+-- EGG DATA
+-- ══════════════════════════════════════════
+local EGG_POSITIONS = {
+    PatrioticEgg = Vector3.new(35.726,    7.432,  -13.731),
+    SweetEgg     = Vector3.new(-3589.398, 160.009, 883.124),
+    ExoticEgg    = Vector3.new(-3578.343, 160.009, 881.48),
+    PlushieEgg	 = Vector3.new(-3567.343, 160.009, 881.48),
+    NewEgg       = Vector3.new(-3578.343, 160.009, 881.48),
+    CommonEgg    = Vector3.new(-84,  10,   1),
+    SpottedEgg   = Vector3.new(-94,  10,   5),
+    IceshardEgg  = Vector3.new(-117, 10,   8),
+    SpikeyEgg    = Vector3.new(-124, 10,   4),
+    MagmaEgg     = Vector3.new(-132, 10,  -2),
+    CrystalEgg   = Vector3.new(-138, 10,  -9),
+    LunarEgg     = Vector3.new(-141, 10, -16),
+    VoidEgg      = Vector3.new(-141, 10, -26),
+    HellEgg      = Vector3.new(-142, 10, -35),
+    NightmareEgg = Vector3.new(-139, 10, -43),
+    ShowmanEgg   = Vector3.new(-126, 10, -56),
+    MiningEgg    = Vector3.new(-117, 10, -61),
+    CyberEgg     = Vector3.new(-95,  10, -62),
+    NeonEgg      = Vector3.new(-86,  10, -55),
+    InfinityEgg  = Vector3.new(-96,   9, -27),
+    IcyEgg       = Vector3.new(-60,  13,  -1),
+    VineEgg      = Vector3.new(-66,  13,   7),
+    LavaEgg      = Vector3.new(-73,  13,  14),
+    AtlantisEgg  = Vector3.new(-82,  13,  19),
+    ClassicEgg   = Vector3.new(-92,  13,  22),
+    RainbowEgg   = Vector3.new(-134, 10, -51),
+    BubbleZone   = Vector3.new(77.556, 7.284, -113.065),
+}
+
+local GEM_PICKUP_POSITIONS = {
+    Vector3.new(2298.777, 3156.152, 823.515),
+    Vector3.new(2260.473, 3156.152, 830.398),
+    Vector3.new(2265.025, 3156.152, 863.398),
+    Vector3.new(2301.695, 3156.152, 855.754),
+}
+
+local COIN_PICKUP_POSITIONS = {
+    Vector3.new(-51.978,15969.225, 40.643), Vector3.new(-40.924,15969.225, 30.896),
+    Vector3.new(-42.801,15969.225, 15.048), Vector3.new(-55.920,15969.225,-13.581),
+    Vector3.new(-79.054,15969.225,-13.581), Vector3.new(-76.309,15969.225, 19.827),
+    Vector3.new(-59.149,15969.225, 26.433), Vector3.new( 57.198,15969.225, 47.302),
+    Vector3.new( 30.650,15969.225, 47.302), Vector3.new( 30.650,15969.225, 31.561),
+    Vector3.new( 53.615,15969.225, 13.961), Vector3.new( 61.395,15969.225,-17.897),
+    Vector3.new( 85.707,15969.225,  1.139), Vector3.new( 74.707,15969.225, 11.639),
+    Vector3.new( 59.207,15969.225, 28.139), Vector3.new( 44.707,15969.225, 41.139),
+    Vector3.new( 73.829,15969.902, -7.008), Vector3.new(-49.671,15969.902, 28.992),
+    Vector3.new(-65.171,15969.902, 15.492), Vector3.new(-50.171,15969.402,  1.992),
+    Vector3.new(-74.171,15969.902, -5.508), Vector3.new(-80.171,15969.902,  8.992),
+    Vector3.new(-62.171,15969.902, -4.008), Vector3.new(-67.171,15969.402,-21.508),
+}
+
+local EGG_NAMES = {
+    "Patriotic Egg", "Sweet Egg", "Exotic Egg", "Plushie Egg", "New Egg",
+    "Common Egg","Spotted Egg","Iceshard Egg","Spikey Egg",
+    "Magma Egg","Crystal Egg","Lunar Egg","Void Egg",
+    "Hell Egg","Rainbow Egg","Nightmare Egg","Showman Egg",
+    "Mining Egg","Cyber Egg","Neon Egg","Infinity Egg",
+    "Icy Egg","Vine Egg","Lava Egg","Atlantis Egg","Classic Egg",
+}
+
+local EGG_NAME_TO_KEY = {}
+for _, n in ipairs(EGG_NAMES) do EGG_NAME_TO_KEY[n] = n:gsub(" ","") end
+local EGG_KEY_TO_NAME = {}
+for n, k in pairs(EGG_NAME_TO_KEY) do EGG_KEY_TO_NAME[k] = n end
+
+local RIFT_DURATIONS = {600, 900, 1800, 2700, 3600}
+
+local GENIE_REWARD_ITEMS = {
+    "Dream Shard","Spin Ticket","Reroll Orb","Power Orb",
+    "Lucky Potion","Speed Potion","Coins Potion","Mythic Potion",
+    "Royal Key","Fire Elixir","Ice Elixir","Infinity Elixir",
+    "Secret Elixir","Egg Elixir","Ultra Infinity Elixir","600M Elixir",
+    "Rune Rock","Green Fragment","Shadow Crystal","Mystery Box",
+}
+
+local CARNIVAL_COIN_TP_POS = Vector3.new(-3572.56, 165.864, 944.746)
+
+-- ══════════════════════════════════════════
+-- RIFT WORKSPACE HELPERS
+-- ══════════════════════════════════════════
+local function eggNameToSlug(name)
+    return name:lower():gsub("%s+", "-")
+end
+local function getRiftsFolder()
+    local rendered = workspace:FindFirstChild("Rendered")
+    if not rendered then return nil end
+    return rendered:FindFirstChild("Rifts")
+end
+local function getModelPosition(model)
+    if not model then return nil end
+    if model.PrimaryPart then return model.PrimaryPart.Position end
+    for _, child in ipairs(model:GetDescendants()) do
+        if child:IsA("BasePart") then return child.Position end
+    end
+    return nil
+end
+local function getRiftPlatformPositions(slug)
+    local riftsFolder = getRiftsFolder()
+    if not riftsFolder then log("RIFT","Rendered.Rifts not found") return {} end
+    local positions = {}
+    for _, riftModel in ipairs(riftsFolder:GetChildren()) do
+        if riftModel.Name == slug then
+            local platform = riftModel:FindFirstChild("EggPlatformSpawn", true)
+            local pos = nil
+            if platform then
+                if platform:IsA("BasePart") then pos = platform.Position
+                elseif platform:IsA("Model") then pos = getModelPosition(platform) end
+                if not pos then
+                    for _, desc in ipairs(platform:GetDescendants()) do
+                        if desc:IsA("BasePart") then pos = desc.Position break end
+                    end
+                end
+            end
+            if not pos then
+                for _, desc in ipairs(riftModel:GetDescendants()) do
+                    if desc:IsA("BasePart") then pos = desc.Position break end
+                end
+            end
+            if pos then
+                table.insert(positions, pos)
+            end
+        end
+    end
+    return positions
+end
+local function pickClosestPlatform(positions, targetY)
+    if #positions == 0 then return nil end
+    if #positions == 1 then return positions[1] end
+    local best, bestDist = positions[1], math.abs(positions[1].Y - targetY)
+    for i = 2, #positions do
+        local d = math.abs(positions[i].Y - targetY)
+        if d < bestDist then bestDist=d best=positions[i] end
+    end
+    return best
+end
+local function findRiftHatchPos(eggName, spawnHeight)
+    local slug = eggNameToSlug(eggName)
+    local deadline = tick() + 8
+    local positions = {}
+    repeat
+        positions = getRiftPlatformPositions(slug)
+        if #positions == 0 then task.wait(0.25) end
+    until #positions > 0 or tick() >= deadline
+    if #positions == 0 then log("RIFT","Timed out waiting for rift model") return nil end
+    return pickClosestPlatform(positions, spawnHeight)
+end
+
+-- ══════════════════════════════════════════
+-- GENERIC PASSIVE RIFT HELPERS
+-- Used by both Doodle Rift and July 4th Rift
+-- ══════════════════════════════════════════
+local function getPassiveRiftInfo(slugList)
+    local riftsFolder = getRiftsFolder()
+    if not riftsFolder then return nil end
+    for _, slug in ipairs(slugList) do
+        for _, child in ipairs(riftsFolder:GetChildren()) do
+            if child.Name == slug then
+                local pos = nil
+                local platform = child:FindFirstChild("EggPlatformSpawn", true)
+                if platform then
+                    if platform:IsA("BasePart") then pos = platform.Position
+                    elseif platform:IsA("Model") then pos = getModelPosition(platform) end
+                    if not pos then
+                        for _, desc in ipairs(platform:GetDescendants()) do
+                            if desc:IsA("BasePart") then pos = desc.Position break end
+                        end
+                    end
+                end
+                if not pos then
+                    for _, desc in ipairs(child:GetDescendants()) do
+                        if desc:IsA("BasePart") then pos = desc.Position break end
+                    end
+                end
+                if pos then
+                    return {slug=slug, pos=pos, model=child}
+                end
+            end
+        end
+    end
+    return nil
+end
+local function passiveRiftStillExists(slug)
+    local riftsFolder = getRiftsFolder()
+    if not riftsFolder then return false end
+    for _, child in ipairs(riftsFolder:GetChildren()) do
+        if child.Name == slug then return true end
+    end
+    return false
+end
+
+-- ══════════════════════════════════════════
+-- OBSIDIAN RIFT HELPERS
+-- ══════════════════════════════════════════
+local OBSIDIAN_RIFT_SLUG = "obsidian-rift"
+local function getObsidianRiftPlatformPositions()
+    return getRiftPlatformPositions(OBSIDIAN_RIFT_SLUG)
+end
+local function obsidianRiftExistsNow()
+    local riftsFolder = getRiftsFolder()
+    if not riftsFolder then return false end
+    for _, child in ipairs(riftsFolder:GetChildren()) do
+        if child.Name == OBSIDIAN_RIFT_SLUG then return true end
+    end
+    return false
+end
+local function findExistingObsidianRiftPos(timeout)
+    timeout = timeout or 5
+    local deadline = tick() + timeout
+    local positions = {}
+    repeat
+        positions = getObsidianRiftPlatformPositions()
+        if #positions == 0 then task.wait(0.25) end
+    until #positions > 0 or tick() >= deadline
+    if #positions == 0 then return nil end
+    return positions[1]
+end
+
+-- ══════════════════════════════════════════
+-- MISC — AUTO PICKUP RANGE
+-- ══════════════════════════════════════════
+local _origGetPickupRange = nil
+local function applyPickupRangePatch()
+    if not StatsUtil then log("MISC","StatsUtil not available") return false end
+    if _origGetPickupRange then return true end
+    _origGetPickupRange = StatsUtil.GetPickupRange
+    StatsUtil.GetPickupRange = function(self, data) return State.pickupRangeStuds end
+    log("MISC","Pickup range patched -> "..tostring(State.pickupRangeStuds).." studs")
+    return true
+end
+local function removePickupRangePatch()
+    if not _origGetPickupRange then return end
+    if StatsUtil then StatsUtil.GetPickupRange = _origGetPickupRange end
+    _origGetPickupRange = nil
+    log("MISC","Pickup range patch removed")
+end
+
+-- ══════════════════════════════════════════
+-- UTILS
+-- ══════════════════════════════════════════
+local function setAction(txt)
+    if State.action ~= txt then
+        log("STATE","action: ["..tostring(State.action).."] -> ["..tostring(txt).."]")
+    end
+    State.action = txt
+end
+
+-- ══════════════════════════════════════════
+-- TP — DO NOT MODIFY THIS FUNCTION
+-- ══════════════════════════════════════════
+local function tp(pos, reason)
+    character = lp.Character
+    if not character or not pos then log("TP","SKIPPED — no char/pos | "..tostring(reason)) return end
+    local r = character:FindFirstChild("HumanoidRootPart")
+    if not r then log("TP","SKIPPED — no HRP | "..tostring(reason)) return end
+    local curPos = r.Position
+    log("TP", string.format("%s -> %.1f,%.1f,%.1f | was %.1f,%.1f,%.1f",
+        tostring(reason), pos.X, pos.Y, pos.Z, curPos.X, curPos.Y, curPos.Z))
+    r.CFrame = CFrame.new(pos)
+    task.wait(0.05)
+end
+
+local function pressKey(k)
+    VirtualInputManager:SendKeyEvent(true,  k, false, game) task.wait(0.02)
+    VirtualInputManager:SendKeyEvent(false, k, false, game) task.wait(0.02)
+end
+local function spamER() pressKey(Enum.KeyCode.E) pressKey(Enum.KeyCode.R) end
+
+local function formatTime(s)
+    s = math.floor(s)
+    if s <= 0 then return "now" end
+    local m = math.floor(s/60)
+    return m>0 and (m.."m "..(s%60).."s") or (s.."s")
+end
+local function secsUntilNextHour() return 3600  - (DateTime.now().UnixTimestamp % 3600)  end
+local function secsUntilMidnight() return 86400 - (DateTime.now().UnixTimestamp % 86400) end
+
+local function getTaskReq(t1)
+    if not t1 then return 0 end
+    if t1.Type=="Collect" then return (t1.Item and t1.Item.Amount) or t1.Amount or 0 end
+    return t1.Amount or 0
+end
+local function resolveEggKey(raw)
+    if not raw or raw=="" then return nil end
+    if EGG_KEY_TO_NAME[raw] then return raw end
+    if EGG_NAME_TO_KEY[raw] then return EGG_NAME_TO_KEY[raw] end
+    local s = raw:gsub("%s+","")
+    if EGG_KEY_TO_NAME[s] then return s end
+    if EGG_KEY_TO_NAME[s.."Egg"] then return s.."Egg" end
+    return s
+end
+
+-- ══════════════════════════════════════════
+-- PRIORITY FLAGS — DO NOT MODIFY
+-- ══════════════════════════════════════════
+local function giBlocking()           return State.giRunning and not State.giQuestsDone end
+local function seasonBlocking()       return State.seasonRunning and not (State.hourlyDone and State.dailyDone) end
+local function riftActive()           return State.riftRunning end
+local function genieBlocking()        return State.genieRunning and State.genieQuestActive end
+local function obsidianRiftBlocking() return State.obsidianRiftRunning and State.obsidianRiftHatchPos ~= nil end
+local function doodleRiftBlocking()   return State.doodleRiftRunning and State.doodleRiftHatchPos ~= nil end
+local function july4thRiftBlocking()  return State.july4thRiftRunning and State.july4thRiftHatchPos ~= nil end
+
+-- ══════════════════════════════════════════
+-- ANCHOR / TP GATE — DO NOT MODIFY
+-- ══════════════════════════════════════════
+local function clearAnchor()
+    log("ANCHOR","clearAnchor() | lastTpKey was: "..tostring(State.lastTpKey))
+    State.lastTpKey  = nil
+    State.lastTpTime = 0
+end
+local function ensureAt(key, pos, guardFn)
+    if not guardFn() then log("GUARD","ensureAt("..tostring(key)..") BLOCKED") return end
+    local chr = lp.Character
+    local hrp = chr and chr:FindFirstChild("HumanoidRootPart")
+    if hrp and (hrp.Position - pos).Magnitude > 8 then
+        if not guardFn() then log("GUARD","ensureAt("..tostring(key)..") ABORTED") return end
+        tp(pos, "ensureAt:"..key)
+    end
+end
+
+-- ══════════════════════════════════════════
+-- WEBHOOK
+-- ══════════════════════════════════════════
+local _webhookCooldown = {}
+local function sendWebhook(content)
+    if not State.webhookEnabled or not State.webhookUrl or State.webhookUrl=="" then return end
+    pcall(function()
+        local reqFn = (syn and syn.request) or (http and http.request) or request
+        if reqFn then
+            reqFn({Url=State.webhookUrl, Method="POST",
+                Headers={["Content-Type"]="application/json"},
+                Body=HttpService:JSONEncode({content=content})})
+        end
+    end)
+end
+local function sendWebhookEmbed(petName, variantPrefix, isTest)
+    if not State.webhookEnabled or not State.webhookUrl or State.webhookUrl=="" then return false, "no URL" end
+    local unixNow = DateTime.now().UnixTimestamp
+    local title, description
+    if isTest then
+        title       = "🧪 Test — FlookHub"
+        description = string.format("**%s** sent a test alert <t:%d:R>", lp.Name, unixNow)
+    else
+        title       = string.format("🔮 %s%s", variantPrefix or "", petName)
+        description = string.format("**%s** just hatched this! <t:%d:R>", lp.Name, unixNow)
+    end
+    local payload = {
+        embeds = {{
+            title       = title,
+            description = description,
+            color       = 0x9B4BFF,
+            thumbnail   = { url = "https://media.discordapp.net/attachments/1505166575295266826/1515198988033200269/image-removebg-preview_-_2026-06-13T053926.067.png" },
+            footer      = { text = "FlookHub • " .. lp.Name },
+        }}
+    }
+    local ok, err = pcall(function()
+        local reqFn = (syn and syn.request) or (http and http.request) or request
+        if not reqFn then error("no http fn") end
+        reqFn({ Url=State.webhookUrl, Method="POST", Headers={["Content-Type"]="application/json"}, Body=HttpService:JSONEncode(payload) })
+    end)
+    return ok, err
+end
+
+-- ══════════════════════════════════════════
+-- ANIM HOOK
+-- ══════════════════════════════════════════
+do
+    local ok, HM = pcall(function()
+        return require(ReplicatedStorage:WaitForChild("Client",10)
+            :WaitForChild("Effects",10):WaitForChild("HatchEgg",10))
+    end)
+    if ok and HM and type(HM.Play)=="function" then
+        local orig = HM.Play
+        pcall(hookfunction, HM.Play, newcclosure(function(self, data)
+            if data and data.Pets and State.webhookEnabled then
+                for _, pe in ipairs(data.Pets) do
+                    local pet = pe and pe.Pet
+                    if pet and pet.Name then
+                        local pd = PetData[pet.Name]
+                        if pd and pd.Rarity == "Secret" then
+                            local now = tick()
+                            if now - (_webhookCooldown[pet.Name] or 0) > 10 then
+                                _webhookCooldown[pet.Name] = now
+                                task.spawn(function()
+                                    local v = pet.Mythic and "Mythic " or pet.Shiny and "Shiny " or pet.XL and "XL " or ""
+                                    sendWebhookEmbed(pet.Name, v, false)
+                                end)
+                            end
+                        end
+                    end
+                end
+            end
+            if State.skipAnim then return end
+            return orig(self, data)
+        end))
+        log("INIT","anim hook ok")
+    end
+end
+
+-- ══════════════════════════════════════════
+-- QUEST HELPERS
+-- ══════════════════════════════════════════
+local function getQuestEntry(data, ctype, idx)
+    local id = ("%s-challenge-%d"):format(string.lower(ctype), idx)
+    if QuestUtil.FindById then return QuestUtil:FindById(data, id) end
+    if data and data.Quests then
+        for _, q in pairs(data.Quests) do
+            if type(q)=="table" and q.Id==id then return q end
+        end
+    end
+end
+
+-- FIXED: direct string comparison, no table lookup needed
+local function isBlacklistedTask(t1)
+    if not t1 or t1.Type ~= "Collect" then return false end
+    local cur = t1.Item and t1.Item.Currency
+    return cur == "Pearls" or cur == "Tickets"
+end
+
+-- FIXED: direct check before anything else
+local function resolveQuestAction(t1)
+    if not t1 then return "_hatch_total", nil end
+    local typ = t1.Type or ""
+    if typ == "Collect" then
+        local cur = t1.Item and t1.Item.Currency
+        if cur == "Pearls" or cur == "Tickets" then return "_skip", nil end
+        return (cur == "Gems") and "_gem" or "_coin", cur
+    end
+    if typ == "Bubbles" then return "_bubble", nil end
+    if typ == "Hatch" then
+        if t1.Egg and t1.Egg ~= ""       then return "_hatch_specific", resolveEggKey(t1.Egg) end
+        if t1.Rarity and t1.Rarity ~= "" then return "_hatch_rarity",   t1.Rarity end
+        return "_hatch_total", nil
+    end
+    return "_hatch_total", nil
+end
+
+local function slotHasBlacklistedTask(tasks)
+    if not tasks then return false end
+    for _, t1 in ipairs(tasks) do
+        if isBlacklistedTask(t1) then return true end
+    end
+    return false
+end
+
+-- ══════════════════════════════════════════
+-- SEASON QUEST DATA
+-- ══════════════════════════════════════════
+local function fillQuestData(ctype)
+    local data = LocalData:Get()
+    if not data then return true, {} end
+    local allDone, det = true, {}
+    for i = 1,3 do
+        local quest = getQuestEntry(data, ctype, i)
+        if quest then
+            local prog = (quest.Progress and quest.Progress[1]) or 0
+            local t1   = quest.Tasks and quest.Tasks[1]
+            local req  = getTaskReq(t1)
+            local blacklisted = isBlacklistedTask(t1)
+            local done = blacklisted or quest.Claimed or (req>0 and prog>=req)
+            if not done then allDone = false end
+            if blacklisted then
+                log("QUEST","Blacklisted: "..tostring(t1 and t1.Item and t1.Item.Currency).." (idx="..i.." "..ctype..")")
+            end
+            local tstr = t1 and ((QuestUtil.FormatTask and QuestUtil:FormatTask(t1)) or (t1.Type or "?").." x"..req) or "Quest #"..i
+            table.insert(det, {task=t1, completed=done, prog=prog, req=req, name=tstr, ctype=ctype, blacklisted=blacklisted})
+        end
+    end
+    return allDone, det
+end
+local function updateQuests()
+    local hd, hdet = fillQuestData("Hourly")
+    local dd, ddet = fillQuestData("Daily")
+    local changed = (hd ~= State.hourlyDone) or (dd ~= State.dailyDone)
+    State.hourlyDone=hd  State.dailyDone=dd
+    State.hourlyDet=hdet State.dailyDet=ddet
+    if changed then
+        log("STATE", string.format("Quest update: hourlyDone=%s dailyDone=%s", tostring(hd), tostring(dd)))
+    end
+end
+
+local function getCurrencyProgress(ctype, currency)
+    local data = LocalData:Get() if not data then return 0,0 end
+    for i=1,3 do
+        local qe = getQuestEntry(data,ctype,i) if qe then
+            local t = qe.Tasks and qe.Tasks[1]
+            if t and t.Type=="Collect" then
+                local qc = t.Item and t.Item.Currency
+                if not currency or qc==currency then
+                    return (qe.Progress and qe.Progress[1]) or 0, getTaskReq(t)
+                end
+            end
+        end
+    end
+    return 0,0
+end
+local function getBubbleProgress(ctype)
+    local data = LocalData:Get() if not data then return 0,0 end
+    for i=1,3 do
+        local qe = getQuestEntry(data,ctype,i) if qe then
+            local t = qe.Tasks and qe.Tasks[1]
+            if t and t.Type=="Bubbles" then return (qe.Progress and qe.Progress[1]) or 0, getTaskReq(t) end
+        end
+    end
+    return 0,0
+end
+local function getHatchProgress(ctype, eggKey, rarity)
+    local data = LocalData:Get() if not data then return 0,0 end
+    for i=1,3 do
+        local qe = getQuestEntry(data,ctype,i) if qe then
+            local t = qe.Tasks and qe.Tasks[1]
+            if t and t.Type=="Hatch" then
+                local m = false
+                if eggKey     then m = resolveEggKey(t.Egg or "")==eggKey
+                elseif rarity then m = t.Rarity==rarity
+                else m = (not t.Egg or t.Egg=="") and (not t.Rarity or t.Rarity=="") end
+                if m then return (qe.Progress and qe.Progress[1]) or 0, getTaskReq(t) end
+            end
+        end
+    end
+    return 0,0
+end
+
+-- ══════════════════════════════════════════
+-- SHARED SUB-TASK EXECUTORS
+-- ══════════════════════════════════════════
+local function doCurrencyCollect(currency, doneFn, sc, sf)
+    local picks = (currency == "Gems") and GEM_PICKUP_POSITIONS or COIN_PICKUP_POSITIONS
+    while sc() do
+        if doneFn() then clearAnchor() return true end
+        for idx, pos in ipairs(picks) do
+            if not sc() then clearAnchor() return false end
+            if doneFn() then clearAnchor() return true end
+            sf("Pickup "..idx.."/"..#picks) setAction("Collect pickup "..idx)
+            ensureAt("pick"..idx, pos, sc) task.wait(0.5)
+        end
+        if doneFn() then clearAnchor() return true end
+        if currency ~= "Gems" then
+            local rbp = EGG_POSITIONS.RainbowEgg
+            if rbp then
+                sf("Draining coins") setAction("Collect drain")
+                local t0 = tick()
+                while sc() and tick()-t0<5 do
+                    if doneFn() then clearAnchor() return true end
+                    ensureAt("rainbow", rbp, sc) spamER() task.wait(0.05)
+                end
+            else task.wait(2) end
+        end
+    end
+    clearAnchor() return false
+end
+
+local function doBubble(doneFn, sc, sf)
+    local bp = EGG_POSITIONS.BubbleZone
+    if not bp then sf("Save Bubble Zone!") task.wait(2) return false end
+    if doneFn() then clearAnchor() return true end
+    sf("Bubbling...") setAction("Bubble")
+    while sc() do
+        if doneFn() then clearAnchor() return true end
+        ensureAt("bubble", bp, sc)
+        pcall(function() Remote:FireServer("BlowBubble") end) task.wait(0.1)
+    end
+    clearAnchor() return false
+end
+
+local function doHatchAtKey(useKey, doneFn, sc, sf, label)
+    local pos = EGG_POSITIONS[useKey]
+    if not pos then sf("No pos: "..tostring(useKey)) task.wait(2) return false end
+    if doneFn() then clearAnchor() return true end
+    sf(label or EGG_KEY_TO_NAME[useKey] or useKey) setAction("Hatch "..useKey)
+    while sc() do
+        if doneFn() then clearAnchor() return true end
+        ensureAt("hatch_"..useKey, pos, sc) spamER() task.wait(0.05)
+    end
+    clearAnchor() return false
+end
+
+local function resolveHatchKey(eggKeyFromTask, rarity)
+    if rarity == "Unique"                               then return "SpikeyEgg"         end
+    if rarity                                           then return "InfinityEgg"       end
+    if eggKeyFromTask and EGG_POSITIONS[eggKeyFromTask] then return eggKeyFromTask      end
+    if EGG_POSITIONS[State.selectedEggKey]              then return State.selectedEggKey end
+    return "InfinityEgg"
+end
+
+-- ══════════════════════════════════════════
+-- SEASON SUB-TASKS
+-- ══════════════════════════════════════════
+local function doCurrencyQuest(q, sc, sf)
+    local currency = q.task and q.task.Item and q.task.Item.Currency
+    local ctype    = q.ctype
+    local function done() local p,r=getCurrencyProgress(ctype,currency) return r>0 and p>=r end
+    return doCurrencyCollect(currency, done, sc, sf)
+end
+local function doBubbleQuest(q, sc, sf)
+    local ctype = q.ctype
+    local function done() local p,r=getBubbleProgress(ctype) return r>0 and p>=r end
+    return doBubble(done, sc, sf)
+end
+local function doHatchQuest(q, eggKey, rarity, sc, sf)
+    local ctype  = q.ctype
+    local useKey = resolveHatchKey(eggKey, rarity)
+    log("STATE", string.format("doHatchQuest: eggKey=%s rarity=%s -> useKey=%s", tostring(eggKey), tostring(rarity), tostring(useKey)))
+    local function done() local p,r=getHatchProgress(ctype,eggKey,rarity) return r>0 and p>=r end
+    return doHatchAtKey(useKey, done, sc, sf)
+end
+
+-- ══════════════════════════════════════════
+-- SEASON LOOP — DO NOT MODIFY TP/GUARD LOGIC
+-- ══════════════════════════════════════════
+local function runSeasonLoop()
+    log("SEASON","started")
+    local lastCheck = 0
+    while State.seasonRunning do
+        if giBlocking() then setAction("Season: waiting G.Inc") task.wait(0.5) continue end
+        if tick()-lastCheck>=2 then lastCheck=tick() updateQuests() end
+        if State.hourlyDone and State.dailyDone then setAction("Season done") task.wait(10) continue end
+        local allQ = {}
+        for _,q in ipairs(State.hourlyDet) do table.insert(allQ,q) end
+        for _,q in ipairs(State.dailyDet)  do table.insert(allQ,q) end
+        local found = false
+        for _,q in ipairs(allQ) do
+            if not q.completed then
+                found = true
+                local act, extra = resolveQuestAction(q.task)
+                log("SEASON","Dispatching: act="..tostring(act).." extra="..tostring(extra))
+                local function sc() return State.seasonRunning and not giBlocking() end
+                local function sf(t) setAction("Season: "..t) end
+                if act == "_skip" then
+                    log("SEASON","_skip — forcing completed")
+                    q.completed = true
+                elseif act=="_coin" or act=="_gem" then doCurrencyQuest(q,sc,sf)
+                elseif act=="_bubble" then doBubbleQuest(q,sc,sf)
+                elseif act=="_hatch_specific" then doHatchQuest(q,extra,nil,sc,sf)
+                elseif act=="_hatch_rarity"   then doHatchQuest(q,nil,extra,sc,sf)
+                else doHatchQuest(q,nil,nil,sc,sf) end
+                updateQuests() break
+            end
+        end
+        if not found then task.wait(1) end
+    end
+    clearAnchor() setAction("Idle") log("SEASON","stopped")
+end
+
+-- ══════════════════════════════════════════
+-- GI HELPERS
+-- ══════════════════════════════════════════
+local function getGINeeds()
+    local data = LocalData:Get()
+    if not data then return true,false,false,false,{} end
+    local prog = {}
+    local needR,needL,needB = false,false,false
+    local allDone = true
+    for i, quest in ipairs(GlobalIncentiveUtil.Quests) do
+        local active = QuestUtil:FindById(data, quest.Id)
+        local t1 = quest.Tasks[1]
+        local req = t1.Amount
+        local p, done = 0, false
+        if active then
+            if active.Claimed then done=true p=req
+            else p=active.Progress and active.Progress[1] or 0 done=(p>=req) end
+        else done=true p=req end
+        prog[i] = {pct=math.min(100,math.floor((p/math.max(req,1))*100)), done=done, prog=p, req=req}
+        if not done then
+            allDone = false
+            if t1.Type=="Hatch" then if req>=500 then needR=true else needL=true end
+            elseif t1.Type=="Bubbles" then needB=true end
+        end
+    end
+    return allDone,needR,needL,needB,prog
+end
+local function doClaimGIRewards()
+    local data = LocalData:Get()
+    if not data or not data.GlobalIncentive then return end
+    local gi = data.GlobalIncentive
+    for i, quest in ipairs(GlobalIncentiveUtil.Quests) do
+        local active = QuestUtil:FindById(data, quest.Id)
+        if ((active==nil) or active.Claimed) and (not gi.ClaimedRewards or not gi.ClaimedRewards[tostring(i)]) then
+            pcall(function() Remote:FireServer("ClaimGlobalIncentiveTrack", i) end) task.wait(0.4)
+        end
+    end
+    if not gi.ClaimedGift then
+        pcall(function() Remote:FireServer("ClaimGlobalIncentiveQuest") end) task.wait(0.4)
+    end
+    local gs = workspace:GetAttribute("GlobalIncentive") or 0
+    if gi.ClaimedIncentives and GlobalIncentiveUtil.IncentiveRewards then
+        for i, reward in ipairs(GlobalIncentiveUtil.IncentiveRewards) do
+            if gs>=reward.Requirement and not gi.ClaimedIncentives[tostring(i)] then
+                pcall(function() Remote:FireServer("ClaimGlobalIncentive", i) end) task.wait(0.4)
+            end
+        end
+    end
+end
+
+-- ══════════════════════════════════════════
+-- GI LOOP — DO NOT MODIFY TP/GUARD LOGIC
+-- ══════════════════════════════════════════
+local function runGILoop()
+    log("GI","started | selectedEggKey="..tostring(State.selectedEggKey))
+    while State.giRunning do
+        local allDone,needR,needL,needB = getGINeeds()
+        if allDone then
+            if not State.giQuestsDone then
+                State.giQuestsDone = true
+                clearAnchor()
+                setAction("G.Inc done — idle")
+                log("GI","quests done — idle")
+                if State.claimGIOn then doClaimGIRewards() end
+            end
+            local data = LocalData:Get()
+            local cur  = data and data.GlobalIncentive and data.GlobalIncentive.QuestSeed or 0
+            if State.giOldSeed == nil then State.giOldSeed = cur end
+            if cur ~= State.giOldSeed then
+                log("GI","new seed — resetting")
+                State.giOldSeed    = nil
+                State.giMode       = "idle"
+                State.giQuestsDone = false
+                clearAnchor()
+                setAction("G.Inc: new seed")
+            else
+                setAction("G.Inc done — idle")
+                task.wait(2)
+            end
+        else
+            State.giQuestsDone = false
+            State.giOldSeed    = nil
+            local function giActive() return State.giRunning and not State.giQuestsDone end
+            if needB then
+                local bp = EGG_POSITIONS.BubbleZone
+                if bp then
+                    if State.giMode ~= "bub" then State.giMode="bub" clearAnchor() setAction("G.Inc: bubble") end
+                    ensureAt("gi_bubble", bp, giActive)
+                    pcall(function() Remote:FireServer("BlowBubble") end) task.wait(0.1)
+                else setAction("G.Inc: save Bubble Zone!") task.wait(2) end
+            elseif needL then
+                local sp = EGG_POSITIONS.SpikeyEgg
+                if sp then
+                    if State.giMode ~= "leg" then State.giMode="leg" clearAnchor() setAction("G.Inc: Spikey") end
+                    ensureAt("gi_spikey", sp, giActive) spamER()
+                else setAction("G.Inc: no Spikey pos!") task.wait(2) end
+            elseif needR then
+                local rp = EGG_POSITIONS[State.selectedEggKey]
+                if rp then
+                    if State.giMode ~= "reg" then State.giMode="reg" clearAnchor() setAction("G.Inc: "..State.selectedEggName) end
+                    ensureAt("gi_reg_"..State.selectedEggKey, rp, giActive) spamER()
+                else setAction("G.Inc: save egg pos!") task.wait(2) end
+            else task.wait(1) end
+        end
+        task.wait(0.05)
+    end
+    State.giMode = "idle"
+    clearAnchor()
+    setAction("Idle")
+    log("GI","stopped")
+end
+
+-- ══════════════════════════════════════════
+-- GEM GENIE HELPERS
+-- ══════════════════════════════════════════
+local function genieSecsUntilReady()
+    local data = LocalData:Get()
+    if not data or not data.GemGenie then return 0 end
+    local nextTime = data.GemGenie.Next or 0
+    return math.max(0, nextTime - DateTime.now().UnixTimestamp)
+end
+local function getActiveGenieQuest()
+    local data = LocalData:Get()
+    if not data then return nil end
+    return QuestUtil:FindById(data, "gem-genie")
+end
+local function getGenieSlotDef(data, slot)
+    if not GenieQuest or not data or not data.GemGenie then return nil end
+    local seed = data.GemGenie.Seed
+    local ok, def = pcall(function() return GenieQuest(data, seed + (slot - 1)) end)
+    return ok and def or nil
+end
+local function isGenieQuestDone(quest)
+    if not quest then return false end
+    if quest.Claimed then return true end
+    if not quest.Tasks or not quest.Progress then return false end
+    for i, t1 in ipairs(quest.Tasks) do
+        if not isBlacklistedTask(t1) then
+            local prog = quest.Progress[i] or 0
+            local req  = getTaskReq(t1)
+            if req > 0 and prog < req then return false end
+        end
+    end
+    return true
+end
+local function pickBestGenieSlot(data)
+    for slot = 1, 3 do
+        local def = getGenieSlotDef(data, slot)
+        if def and not slotHasBlacklistedTask(def.Tasks) then
+            log("GENIE","Best slot: "..slot)
+            return slot
+        end
+    end
+    log("GENIE","All slots blacklisted — falling back to slot 1")
+    return 1
+end
+local function findGenieSlotWithReward(data, targetName)
+    if not GenieQuest or not data or not data.GemGenie then return nil end
+    local target = targetName:lower()
+    for slot = 1, 3 do
+        local def = getGenieSlotDef(data, slot)
+        if def then
+            if slotHasBlacklistedTask(def.Tasks) then
+                log("GENIE","Slot "..slot.." skipped (blacklisted tasks)")
+            elseif def.Rewards then
+                for _, reward in ipairs(def.Rewards) do
+                    local rname = (reward.Name or ""):lower()
+                    if rname:find(target, 1, true) then
+                        log("GENIE","Slot "..slot.." has reward matching '"..targetName.."'")
+                        return slot
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+-- ══════════════════════════════════════════
+-- GEM GENIE TASK EXECUTOR
+-- ══════════════════════════════════════════
+local function executeGenieTask(t1, taskIdx, sc)
+    local req = getTaskReq(t1)
+    local function progDone()
+        local fresh = getActiveGenieQuest()
+        if not fresh then return true end
+        if fresh.Claimed then return true end
+        if isBlacklistedTask(t1) then return true end
+        local p = fresh.Progress and fresh.Progress[taskIdx] or 0
+        return req > 0 and p >= req
+    end
+    if progDone() then log("GENIE","Task "..taskIdx.." already done") return end
+    local act, extra = resolveQuestAction(t1)
+    log("GENIE","Task "..taskIdx.." act="..act.." extra="..tostring(extra).." req="..req)
+    local function sf(t) setAction("Genie: "..t) end
+    if act == "_skip" then
+        log("GENIE","Task "..taskIdx.." blacklisted (_skip)") return
+    elseif act == "_gem" then
+        doCurrencyCollect("Gems", progDone, sc, sf)
+    elseif act == "_coin" then
+        local cur = t1.Item and t1.Item.Currency or "Coins"
+        doCurrencyCollect(cur, progDone, sc, sf)
+    elseif act == "_bubble" then
+        doBubble(progDone, sc, sf)
+    elseif act == "_hatch_specific" then
+        local useKey = resolveHatchKey(extra, nil)
+        doHatchAtKey(useKey, progDone, sc, sf)
+    elseif act == "_hatch_rarity" then
+        local useKey = resolveHatchKey(nil, extra)
+        doHatchAtKey(useKey, progDone, sc, sf)
+    else
+        local useKey = resolveHatchKey(nil, nil)
+        doHatchAtKey(useKey, progDone, sc, sf)
+    end
+end
+
+-- ══════════════════════════════════════════
+-- GEM GENIE LOOP
+-- ══════════════════════════════════════════
+local function runGenieLoop()
+    log("GENIE","started mode="..tostring(State.genieMode).." target="..tostring(State.genieRerollTarget))
+    while State.genieRunning do
+        if giBlocking()           then setAction("Genie: waiting G.Inc")   task.wait(0.5) continue end
+        if seasonBlocking()       then setAction("Genie: waiting Season")  task.wait(0.5) continue end
+        if obsidianRiftBlocking() then setAction("Genie: waiting ObsRift") task.wait(0.5) continue end
+        local data = LocalData:Get()
+        if not data then task.wait(1) continue end
+        local secsLeft = genieSecsUntilReady()
+        if secsLeft > 0 then
+            setAction("Genie: ready in " .. formatTime(secsLeft))
+            State.genieQuestActive = false
+            State.genieQuestDone   = false
+            task.wait(5)
+            continue
+        end
+        local function sc()
+            return State.genieRunning
+                and not giBlocking()
+                and not seasonBlocking()
+                and not obsidianRiftBlocking()
+        end
+        local activeQuest = getActiveGenieQuest()
+        if activeQuest and not isGenieQuestDone(activeQuest) then
+            log("GENIE","Resuming active quest")
+            State.genieQuestActive = true
+            State.genieQuestDone   = false
+            if activeQuest.Tasks then
+                for i, t1 in ipairs(activeQuest.Tasks) do
+                    if not sc() then break end
+                    executeGenieTask(t1, i, sc)
+                end
+            end
+            State.genieQuestActive = false
+            State.genieQuestDone   = true
+            setAction("Genie: quest done — waiting cooldown")
+        elseif activeQuest and isGenieQuestDone(activeQuest) then
+            State.genieQuestActive = false
+            State.genieQuestDone   = true
+            setAction("Genie: quest done — waiting cooldown")
+            task.wait(5)
+        else
+            State.genieQuestActive = false
+            State.genieQuestDone   = false
+            local slotToPick = 1
+            if State.genieMode == "reroll" and State.genieRerollTarget and State.genieRerollTarget ~= "" then
+                local maxRerolls = 30
+                local rolls      = 0
+                while State.genieRunning and rolls <= maxRerolls do
+                    if giBlocking() or seasonBlocking() or obsidianRiftBlocking() then break end
+                    local freshData = LocalData:Get()
+                    if not freshData then break end
+                    local foundSlot = findGenieSlotWithReward(freshData, State.genieRerollTarget)
+                    if foundSlot then
+                        slotToPick = foundSlot
+                        log("GENIE","Found '"..State.genieRerollTarget.."' in slot "..foundSlot.." after "..rolls.." rerolls")
+                        break
+                    end
+                    if rolls >= maxRerolls then
+                        slotToPick = pickBestGenieSlot(freshData)
+                        break
+                    end
+                    setAction("Genie: rerolling ("..rolls.."/"..maxRerolls..") for "..State.genieRerollTarget)
+                    pcall(function() Remote:FireServer("RerollGenie") end)
+                    rolls += 1
+                    task.wait(1)
+                end
+            else
+                local freshData = LocalData:Get()
+                if freshData then slotToPick = pickBestGenieSlot(freshData) end
+            end
+            if not State.genieRunning then break end
+            setAction("Genie: picking slot "..slotToPick)
+            pcall(function() Remote:FireServer("StartGenieQuest", slotToPick) end)
+            local deadline = tick() + 5
+            local newQuest = nil
+            repeat task.wait(0.3) newQuest = getActiveGenieQuest()
+            until newQuest or tick() >= deadline
+            if not newQuest then
+                log("GENIE","Quest not found after picking slot — retrying")
+                task.wait(2) continue
+            end
+            State.genieQuestActive = true
+            State.genieQuestDone   = false
+            if newQuest.Tasks then
+                for i, t1 in ipairs(newQuest.Tasks) do
+                    if not sc() then break end
+                    executeGenieTask(t1, i, sc)
+                end
+            end
+            State.genieQuestActive = false
+            State.genieQuestDone   = true
+            setAction("Genie: quest done — waiting cooldown")
+        end
+        task.wait(1)
+    end
+    State.genieQuestActive = false
+    State.genieQuestDone   = false
+    clearAnchor()
+    setAction("Idle")
+    log("GENIE","stopped")
+end
+
+-- ══════════════════════════════════════════
+-- HATCH LOOP — DO NOT MODIFY TP/GUARD LOGIC
+-- ══════════════════════════════════════════
+local function runHatchLoop()
+    log("HATCH","started egg="..tostring(State.selectedEggKey))
+    while State.hatchRunning do
+        if giBlocking()           then setAction("Hatch: waiting G.Inc")   task.wait(0.5) continue end
+        if seasonBlocking()       then setAction("Hatch: waiting Season")  task.wait(0.5) continue end
+        if genieBlocking()        then setAction("Hatch: waiting Genie")   task.wait(0.5) continue end
+        if riftActive()           then setAction("Hatch: waiting Rift")    task.wait(0.5) continue end
+        if doodleRiftBlocking()   then setAction("Hatch: waiting Doodle")  task.wait(0.5) continue end
+        if obsidianRiftBlocking() then setAction("Hatch: waiting ObsRift") task.wait(0.5) continue end
+        if july4thRiftBlocking()  then setAction("Hatch: waiting J4Rift")  task.wait(0.5) continue end
+        local pos = EGG_POSITIONS[State.selectedEggKey]
+        if not pos then setAction("Hatch: no pos for "..tostring(State.selectedEggKey)) task.wait(1) continue end
+        setAction("Hatching "..tostring(State.selectedEggName))
+        if not State.hatchRunning then break end
+        local chr = lp.Character
+        local hrp = chr and chr:FindFirstChild("HumanoidRootPart")
+        if hrp and (hrp.Position - pos).Magnitude > 8 then
+            if not State.hatchRunning then break end
+            tp(pos, "hatch_loop:"..tostring(State.selectedEggKey))
+        end
+        if not State.hatchRunning then break end
+        if State.hatchSpam then spamER() else task.wait(0.1) end
+    end
+    clearAnchor()
+    setAction("Idle")
+    log("HATCH","stopped")
+end
+
+-- ══════════════════════════════════════════
+-- RIFT LOOP — DO NOT MODIFY TP/GUARD LOGIC
+-- ══════════════════════════════════════════
+Remote.Event("PlayerSummonedRift"):Connect(function(playerName, _, _, _, heightVal)
+    if playerName ~= lp.Name then return end
+    State.riftSpawnHeight = heightVal
+    log("RIFT","Spawn height from server: "..tostring(heightVal))
+end)
+
+local function runRiftLoop()
+    log("RIFT","started")
+    while State.riftRunning do
+        if giBlocking()     then setAction("Rift: waiting G.Inc")  task.wait(0.5) continue end
+        if seasonBlocking() then setAction("Rift: waiting Season") task.wait(0.5) continue end
+        if genieBlocking()  then setAction("Rift: waiting Genie")  task.wait(0.5) continue end
+        local eggName  = State.riftConfig.eggName
+        local slot     = math.clamp(State.riftConfig.time or 1, 1, 5)
+        local duration = RIFT_DURATIONS[slot] or 600
+        setAction("Rift: summoning "..eggName)
+        State.riftSpawnHeight = nil
+        local ok, success = pcall(function()
+            return Remote:InvokeServer("SummonRift", {
+                Type="Egg", World=State.riftConfig.world or "The Overworld", Name=eggName,
+                Time=slot, Luck=math.clamp(State.riftConfig.luck or 1, 1, 5),
+            })
+        end)
+        if not ok then log("RIFT","Summon error: "..tostring(success)) setAction("Rift: summon error") task.wait(10) continue end
+        if success == false then log("RIFT","Summon rejected") setAction("Rift: rejected") task.wait(10) continue end
+        local ws = tick()
+        while not State.riftSpawnHeight and tick()-ws < 12 do task.wait(0.25) end
+        if not State.riftSpawnHeight then log("RIFT","No height event") setAction("Rift: no spawn event") task.wait(5) continue end
+        local spawnHeight = State.riftSpawnHeight
+        local hatchPos = findRiftHatchPos(eggName, spawnHeight)
+        if not hatchPos then
+            local eggKey    = State.riftConfig.eggKey or eggName:gsub(" ","")
+            local groundPos = EGG_POSITIONS[eggKey] or EGG_POSITIONS.SpikeyEgg
+            hatchPos = Vector3.new(groundPos.X, spawnHeight+2, groundPos.Z)
+        end
+        State.riftHatchPos   = hatchPos
+        State.riftExpireTime = tick() + duration
+        clearAnchor()
+        tp(hatchPos, "rift_initial")
+        task.wait(0.5)
+        local lastReTp = tick()
+        while State.riftRunning and tick() < State.riftExpireTime do
+            if giBlocking() or seasonBlocking() or genieBlocking() then break end
+            if tick()-lastReTp >= 4 then
+                local refreshed = findRiftHatchPos(eggName, spawnHeight)
+                if refreshed then
+                    local chr = lp.Character
+                    local hrp = chr and chr:FindFirstChild("HumanoidRootPart")
+                    if hrp and (hrp.Position-refreshed).Magnitude > 5 then
+                        hatchPos=refreshed State.riftHatchPos=hatchPos
+                        tp(hatchPos, "rift_reanchor")
+                    end
+                else log("RIFT","platform gone") break end
+                lastReTp = tick()
+            end
+            spamER() task.wait(0.05)
+        end
+        clearAnchor()
+        State.riftHatchPos=nil State.riftExpireTime=0 State.riftSpawnHeight=nil
+        if State.riftRunning and not giBlocking() and not seasonBlocking() then
+            setAction("Rift: expired — 3s cooldown") task.wait(3)
+        end
+    end
+    clearAnchor() setAction("Idle") log("RIFT","stopped")
+end
+
+-- ══════════════════════════════════════════
+-- OBSIDIAN RIFT LOOP
+-- ══════════════════════════════════════════
+Remote.Event("PlayerSummonedRift"):Connect(function(playerName, _, _, _, heightVal)
+    if playerName ~= lp.Name then return end
+    State.obsidianRiftSpawnHeight = heightVal
+end)
+
+local function runObsidianRiftLoop()
+    log("OBSRIFT","started")
+    while State.obsidianRiftRunning do
+        if giBlocking()     then setAction("ObsRift: waiting G.Inc")  task.wait(0.5) continue end
+        if seasonBlocking() then setAction("ObsRift: waiting Season") task.wait(0.5) continue end
+        if genieBlocking()  then setAction("ObsRift: waiting Genie")  task.wait(0.5) continue end
+        if riftActive()     then setAction("ObsRift: waiting Rift")   task.wait(0.5) continue end
+        local rc   = State.obsidianRiftConfig
+        local slot = math.clamp(rc.time or 1, 1, 5)
+        local luck = math.clamp(rc.luck or 1, 1, 5)
+        local hatchPos = nil
+        if obsidianRiftExistsNow() then
+            hatchPos = findExistingObsidianRiftPos(5)
+        end
+        if not hatchPos then
+            setAction("ObsRift: summoning...")
+            State.obsidianRiftSpawnHeight = nil
+            local ok, success = pcall(function()
+                return Remote:InvokeServer("SummonMoonRift", {Type="Egg", Time=slot, Luck=luck})
+            end)
+            if not ok then setAction("ObsRift: summon error") task.wait(10) continue end
+            if success == false then setAction("ObsRift: rejected") task.wait(10) continue end
+            local ws = tick()
+            while not State.obsidianRiftSpawnHeight and not obsidianRiftExistsNow() and tick()-ws < 15 do
+                task.wait(0.25)
+            end
+            if State.obsidianRiftSpawnHeight then
+                local spawnHeight = State.obsidianRiftSpawnHeight
+                local deadline2 = tick() + 8
+                local positions = {}
+                repeat
+                    positions = getObsidianRiftPlatformPositions()
+                    if #positions == 0 then task.wait(0.25) end
+                until #positions > 0 or tick() >= deadline2
+                if #positions > 0 then
+                    hatchPos = pickClosestPlatform(positions, spawnHeight)
+                else
+                    local eggKey    = rc.eggKey or rc.eggName:gsub(" ","")
+                    local groundPos = EGG_POSITIONS[eggKey] or EGG_POSITIONS.SpikeyEgg
+                    hatchPos = Vector3.new(groundPos.X, spawnHeight + 2, groundPos.Z)
+                end
+            else
+                hatchPos = findExistingObsidianRiftPos(5)
+                if not hatchPos then setAction("ObsRift: no platform found") task.wait(5) continue end
+            end
+        end
+        State.obsidianRiftHatchPos = hatchPos
+        setAction("ObsRift: hatching "..tostring(rc.eggName))
+        clearAnchor()
+        tp(hatchPos, "obsrift_initial")
+        task.wait(0.5)
+        local lastReTp = tick()
+        while State.obsidianRiftRunning do
+            if giBlocking() or seasonBlocking() or genieBlocking() or riftActive() then break end
+            if not obsidianRiftExistsNow() then break end
+            if tick() - lastReTp >= 4 then
+                local newPositions = getObsidianRiftPlatformPositions()
+                if #newPositions > 0 then
+                    local refreshed = pickClosestPlatform(newPositions, hatchPos.Y)
+                    local chr = lp.Character
+                    local hrp = chr and chr:FindFirstChild("HumanoidRootPart")
+                    if hrp and (hrp.Position - refreshed).Magnitude > 5 then
+                        hatchPos = refreshed
+                        State.obsidianRiftHatchPos = hatchPos
+                        tp(hatchPos, "obsrift_reanchor")
+                    end
+                else break end
+                lastReTp = tick()
+            end
+            spamER() task.wait(0.05)
+        end
+        clearAnchor()
+        State.obsidianRiftHatchPos    = nil
+        State.obsidianRiftSpawnHeight = nil
+        if State.obsidianRiftRunning and not giBlocking() and not seasonBlocking() then
+            setAction("ObsRift: cooldown 3s") task.wait(3)
+        end
+    end
+    clearAnchor() setAction("Idle") log("OBSRIFT","stopped")
+end
+
+-- ══════════════════════════════════════════
+-- DOODLE RIFT LOOP (new in v17)
+-- Passive detection — slug: "doodle-rift"
+-- Priority: above July4th, below Obsidian
+-- ══════════════════════════════════════════
+local function runDoodleRiftLoop()
+    log("DOODLE","started — polling for doodle-rift")
+    local POLL_INTERVAL = 30
+    while State.doodleRiftRunning do
+        if giBlocking()           then setAction("DoodleRift: waiting G.Inc")   task.wait(0.5) continue end
+        if seasonBlocking()       then setAction("DoodleRift: waiting Season")  task.wait(0.5) continue end
+        if obsidianRiftBlocking() then setAction("DoodleRift: waiting ObsRift") task.wait(0.5) continue end
+        local info = getPassiveRiftInfo({State.doodleRiftSlug})
+        if not info then
+            setAction("DoodleRift: polling... (no rift present)")
+            local pollStart = tick()
+            while State.doodleRiftRunning and tick()-pollStart < POLL_INTERVAL do
+                if giBlocking() or seasonBlocking() or obsidianRiftBlocking() then break end
+                task.wait(1)
+            end
+            continue
+        end
+        local slug     = info.slug
+        local hatchPos = info.pos
+        State.doodleRiftHatchPos = hatchPos
+        log("DOODLE", string.format("Rift '%s' found — hatching at %.1f,%.1f,%.1f", slug, hatchPos.X, hatchPos.Y, hatchPos.Z))
+        setAction("DoodleRift: 🎨 hatching!")
+        clearAnchor()
+        tp(hatchPos, "doodle_initial")
+        task.wait(0.5)
+        local lastRefresh = tick()
+        while State.doodleRiftRunning do
+            if giBlocking() or seasonBlocking() or obsidianRiftBlocking() then log("DOODLE","Interrupted") break end
+            if not passiveRiftStillExists(slug) then
+                log("DOODLE","Rift gone — polling again")
+                setAction("DoodleRift: rift expired — polling again")
+                break
+            end
+            if tick() - lastRefresh >= 4 then
+                local refreshInfo = getPassiveRiftInfo({slug})
+                if refreshInfo then
+                    local chr = lp.Character
+                    local hrp = chr and chr:FindFirstChild("HumanoidRootPart")
+                    if hrp and (hrp.Position - refreshInfo.pos).Magnitude > 6 then
+                        hatchPos = refreshInfo.pos
+                        State.doodleRiftHatchPos = hatchPos
+                        tp(hatchPos, "doodle_reanchor")
+                    end
+                end
+                lastRefresh = tick()
+            end
+            spamER() task.wait(0.05)
+        end
+        clearAnchor()
+        State.doodleRiftHatchPos = nil
+        if State.doodleRiftRunning then task.wait(2) end
+    end
+    State.doodleRiftHatchPos = nil
+    clearAnchor()
+    setAction("Idle")
+    log("DOODLE","stopped")
+end
+
+-- ══════════════════════════════════════════
+-- JULY 4TH RIFT LOOP
+-- ══════════════════════════════════════════
+local function runJuly4thRiftLoop()
+    log("J4RIFT","started")
+    local POLL_INTERVAL = 30
+    while State.july4thRiftRunning do
+        if giBlocking()         then setAction("J4Rift: waiting G.Inc")    task.wait(0.5) continue end
+        if seasonBlocking()     then setAction("J4Rift: waiting Season")   task.wait(0.5) continue end
+        if obsidianRiftBlocking() then setAction("J4Rift: waiting ObsRift") task.wait(0.5) continue end
+        if doodleRiftBlocking() then setAction("J4Rift: waiting Doodle")   task.wait(0.5) continue end
+        local info = getPassiveRiftInfo(State.july4thRiftSlugs)
+        if not info then
+            setAction("J4Rift: polling... (no rift present)")
+            local pollStart = tick()
+            while State.july4thRiftRunning and tick()-pollStart < POLL_INTERVAL do
+                if giBlocking() or seasonBlocking() or obsidianRiftBlocking() or doodleRiftBlocking() then break end
+                task.wait(1)
+            end
+            continue
+        end
+        local slug     = info.slug
+        local hatchPos = info.pos
+        State.july4thRiftHatchPos = hatchPos
+        log("J4RIFT", string.format("'%s' found — hatching at %.1f,%.1f,%.1f", slug, hatchPos.X, hatchPos.Y, hatchPos.Z))
+        setAction("J4Rift: 🎆 "..slug.." — hatching!")
+        clearAnchor()
+        tp(hatchPos, "j4rift_initial")
+        task.wait(0.5)
+        local lastRefresh = tick()
+        while State.july4thRiftRunning do
+            if giBlocking() or seasonBlocking() or obsidianRiftBlocking() or doodleRiftBlocking() then break end
+            if not passiveRiftStillExists(slug) then
+                setAction("J4Rift: rift expired — polling again")
+                break
+            end
+            if tick() - lastRefresh >= 4 then
+                local refreshInfo = getPassiveRiftInfo({slug})
+                if refreshInfo then
+                    local chr = lp.Character
+                    local hrp = chr and chr:FindFirstChild("HumanoidRootPart")
+                    if hrp and (hrp.Position - refreshInfo.pos).Magnitude > 6 then
+                        hatchPos = refreshInfo.pos
+                        State.july4thRiftHatchPos = hatchPos
+                        tp(hatchPos, "j4rift_reanchor")
+                    end
+                end
+                lastRefresh = tick()
+            end
+            spamER() task.wait(0.05)
+        end
+        clearAnchor()
+        State.july4thRiftHatchPos = nil
+        if State.july4thRiftRunning then task.wait(2) end
+    end
+    State.july4thRiftHatchPos = nil
+    clearAnchor()
+    setAction("Idle")
+    log("J4RIFT","stopped")
+end
+
+-- ══════════════════════════════════════════
+-- REBIRTH MACHINE (new in v17)
+-- Finds 5 non-locked, non-XL, non-team Secret pets matching petName,
+-- then fires UseRebirthMachine with their IDs.
+-- ══════════════════════════════════════════
+local function getRebirthPets(petName)
+    local data = LocalData:Get()
+    if not data or not data.Pets then return nil end
+    -- Build team pet set so we skip equipped pets
+    local teamPetIds = {}
+    if data.Teams and data.TeamEquipped then
+        local team = data.Teams[data.TeamEquipped]
+        if team and team.Pets then
+            for _, id in ipairs(team.Pets) do teamPetIds[id] = true end
+        end
+    end
+    local found = {}
+    for _, pet in ipairs(data.Pets) do
+        if pet.Name == petName and not pet.Locked and not pet.XL and not teamPetIds[pet.Id] then
+            local pd = PetData[pet.Name]
+            if pd and pd.Rarity == "Secret" then
+                table.insert(found, pet)
+                if #found >= 5 then break end
+            end
+        end
+    end
+    return #found >= 5 and found or nil
+end
+
+local function runRebirthMachineLoop()
+    log("REBIRTH","started | petName="..tostring(State.rebirthConfig.petName))
+    while State.rebirthRunning do
+        if giBlocking()     then setAction("Rebirth: waiting G.Inc")  task.wait(0.5) continue end
+        if seasonBlocking() then setAction("Rebirth: waiting Season") task.wait(0.5) continue end
+
+        local petName = State.rebirthConfig.petName
+        local pets    = getRebirthPets(petName)
+
+        if not pets then
+            State.rebirthLastCount = 0
+            local data = LocalData:Get()
+            if data and data.Pets then
+                for _, p in ipairs(data.Pets) do
+                    if p.Name == petName then
+                        State.rebirthLastCount += 1
+                    end
+                end
+            end
+            setAction("Rebirth: need 5x "..petName.." ("..State.rebirthLastCount.." found)")
+            task.wait(5)
+            continue
+        end
+
+        -- Build ID array
+        local ids = {}
+        for _, p in ipairs(pets) do table.insert(ids, p.Id) end
+
+        setAction("Rebirth: converting 5x "..petName.."...")
+        log("REBIRTH","Firing UseRebirthMachine with "..#ids.." pets")
+
+        local ok, result = pcall(function()
+            return Remote:InvokeServer("UseRebirthMachine", ids)
+        end)
+
+        if ok and result then
+            local variantName = "Normal"
+            if result.Mythic and result.Shiny then variantName = "Shiny Mythic"
+            elseif result.Mythic then variantName = "Mythic"
+            elseif result.Shiny  then variantName = "Shiny" end
+            local gotName = (result.Name or "Unknown").." ("..variantName..")"
+            setAction("Rebirth: got "..gotName.."!")
+            log("REBIRTH","Result: "..gotName)
+            State.rebirthLastCount = 0
+        elseif ok and result == nil then
+            setAction("Rebirth: server returned nil (cooldown?)")
+            log("REBIRTH","Server returned nil — likely on cooldown")
+            task.wait(10)
+        else
+            setAction("Rebirth: error — "..tostring(result))
+            log("REBIRTH","Error: "..tostring(result))
+            task.wait(5)
+        end
+
+        task.wait(3)
+    end
+    setAction("Idle")
+    log("REBIRTH","stopped")
+end
+
+-- ══════════════════════════════════════════
+-- EVENT LOOPS
+-- ══════════════════════════════════════════
+local function runCarnivalChestLoop()
+    while State.carnivalChestRunning do
+        setAction("Event: opening Carnival Chest")
+        pcall(function() Remote:FireServer("ClaimChest", "Carnival Chest", true) end)
+        local s = tick()
+        while State.carnivalChestRunning and tick()-s < (State.carnivalChestInterval or 30) do task.wait(1) end
+    end
+    setAction("Idle")
+end
+
+local function runCarnivalRebirthLoop()
+    while State.carnivalRebirthRunning do
+        setAction("Event: Carnival Rebirth firing...")
+        pcall(function() Remote:FireServer("CarnivalRebirth") end)
+        local s = tick()
+        while State.carnivalRebirthRunning and tick()-s < (State.carnivalRebirthInterval or 5) do task.wait(1) end
+    end
+    setAction("Idle")
+end
+
+local function runCarnivalCoinTpLoop()
+    while State.carnivalCoinTpRunning do
+        local chr = lp.Character
+        local hrp = chr and chr:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            local savedPos = hrp.Position
+            hrp.CFrame = CFrame.new(CARNIVAL_COIN_TP_POS)
+            task.wait(0.05)
+            if State.carnivalCoinTpRunning and hrp.Parent then
+                hrp.CFrame = CFrame.new(savedPos)
+            end
+        end
+        local s = tick()
+        while State.carnivalCoinTpRunning and tick()-s < 3 do task.wait(0.1) end
+    end
+    setAction("Idle")
+end
+
+-- ══════════════════════════════════════════
+-- ENCHANT LOOP
+-- ══════════════════════════════════════════
+local function runEnchantLoop()
+    local function getSecrets()
+        local data = LocalData:Get() if not data then return {} end
+        local team = data.Teams and data.Teams[data.TeamEquipped]
+        if not team then return {} end
+        local pm={} for _,p in ipairs(data.Pets) do pm[p.Id]=p end
+        local seen,out={},{}
+        for _,id in ipairs(team.Pets) do
+            if not seen[id] then seen[id]=true
+                local pet=pm[id]
+                if pet then local pd=PetData[pet.Name] if pd and pd.Rarity=="Secret" then table.insert(out,pet) end end
+            end
+        end
+        return out
+    end
+    local function hasShadow() local d=LocalData:Get() return d and d.Powerups and (d.Powerups["Shadow Crystal"] or 0)>0 end
+    local function hasTargets(pet)
+        if not pet.Enchants or #pet.Enchants==0 then return false end
+        local own={} for _,e in ipairs(pet.Enchants) do own[e.Id]=true end
+        for _,t in ipairs(State.enchantTargets) do if not own[t] then return false end end
+        return true
+    end
+    local function getBad(pet)
+        if not pet.Enchants then return nil end
+        for i,e in ipairs(pet.Enchants) do
+            local isT=false for _,t in ipairs(State.enchantTargets) do if e.Id==t then isT=true break end end
+            if not isT then return i end
+        end
+    end
+    local function getGood(pet,bad)
+        if not pet.Enchants then return nil end
+        for i,e in ipairs(pet.Enchants) do
+            if i~=bad then for _,t in ipairs(State.enchantTargets) do if e.Id==t then return i end end end
+        end
+    end
+    while State.enchanting do
+        local secs = getSecrets()
+        if #secs==0 then setAction("Enchant: no secrets") task.wait(2)
+        else
+            local tgt,bad,lock=nil,nil,nil
+            for _,p in ipairs(secs) do
+                if not hasTargets(p) then bad=getBad(p) tgt=p lock=bad and getGood(p,bad) or nil break end
+            end
+            if not tgt then
+                setAction("Enchant: all done")
+                for i=30,1,-1 do if not State.enchanting then break end task.wait(1) end
+            elseif hasShadow() then
+                setAction("Enchant: Shadow Crystal > "..tgt.Name)
+                Remote:FireServer("UseShadowCrystal",tgt.Id,lock) task.wait(1.5)
+            else
+                local cur = State.enchantCurrency or "Gems"
+                setAction("Enchant: rerolling "..tgt.Name.." ["..cur.."]")
+                local r=Remote:InvokeServer("RerollEnchants",tgt.Id,cur,lock)
+                if not r then setAction("Enchant: insufficient "..cur) task.wait(2) else task.wait(0.8) end
+            end
+        end
+        task.wait(0.05)
+    end
+    setAction("Idle")
+end
+
+-- ══════════════════════════════════════════
+-- SHRINE
+-- ══════════════════════════════════════════
+local function fireAllShrines()
+    local ss = State.shrineSettings
+    pcall(function() Remote:InvokeServer("DonateToShrine",{Level=ss.bubbleLevel,Type=ss.bubbleType,Name=ss.bubbleName,Amount=ss.bubbleAmount}) end) task.wait(0.5)
+    pcall(function() Remote:InvokeServer("DonateToDreamerShrine",ss.dreamerAmount) end) task.wait(0.5)
+    pcall(function() Remote:InvokeServer("DonateToPermanentShrine","Lucky",ss.permShrineLuck,ss.permShrineAmount) end) task.wait(1)
+    pcall(function() Remote:FireServer("ClaimPermanentShrineBuff",ss.permShrineEgg) end) task.wait(0.5)
+    pcall(function() Remote:FireServer("ClaimPermanentShrineBuff",ss.permShrineEgg) end)
+    State.shrineNextRun = DateTime.now().UnixTimestamp + ss.interval
+end
+local function runShrineLoop()
+    fireAllShrines()
+    while State.shrineRunning do
+        local w=State.shrineSettings.interval local s=tick()
+        while State.shrineRunning and tick()-s<w do task.wait(5) end
+        if State.shrineRunning then fireAllShrines() end
+    end
+end
+
+-- ══════════════════════════════════════════
+-- PLAYTIME + PRESENT RAIN + CLAIM GI
+-- ══════════════════════════════════════════
+local function claimAllPlaytime()
+    pcall(function() Remote:FireServer("ClaimAllPlaytime") end)
+    local data = LocalData:Get()
+    if data and data.PlaytimeRewards then
+        for i=1,9 do
+            local c=data.PlaytimeRewards.Claimed and data.PlaytimeRewards.Claimed[tostring(i)]
+            if not c then pcall(function() Remote:InvokeServer("ClaimPlaytime",i) end) task.wait(0.3) end
+        end
+    end
+end
+local function runPlaytimeLoop()
+    while State.playtimeRunning do
+        claimAllPlaytime()
+        local s=tick() while State.playtimeRunning and tick()-s<60 do task.wait(1) end
+    end
+end
+local function collectPresent(name)
+    pcall(function() Remote:FireServer("CollectPresentRain",name) end)
+    State.prCount+=1
+end
+local function runPresentRainLoop()
+    local mf=workspace:FindFirstChild("Markers") and workspace.Markers:FindFirstChild("PresentRain")
+    if not mf then log("RAIN","no folder") State.prRunning=false return end
+    for _,c in ipairs(mf:GetChildren()) do if not State.prRunning then return end collectPresent(c.Name) task.wait(0.05) end
+    if State.prConn then State.prConn:Disconnect() end
+    State.prConn=mf.ChildAdded:Connect(function(c) if not State.prRunning then return end task.wait(0.1) collectPresent(c.Name) end)
+end
+local function runClaimGILoop()
+    while State.claimGIOn do
+        if State.giQuestsDone then doClaimGIRewards() end
+        task.wait(5)
+    end
+end
+
+-- ══════════════════════════════════════════
+-- ANTI AFK
+-- ══════════════════════════════════════════
+local function runAFKLoop()
+    while State.afkRunning do
+        local s = tick()
+        while State.afkRunning and tick()-s < 60 do task.wait(1) end
+        if State.afkRunning then pressKey(Enum.KeyCode.K) end
+    end
+end
+
+-- ══════════════════════════════════════════
+-- HEARTBEAT
+-- ══════════════════════════════════════════
+task.spawn(function()
+    local deviceId = lp.Name
+    while true do
+        pcall(function()
+            local reqFn = (syn and syn.request) or (http and http.request) or request
+            if reqFn then
+                reqFn({ Url="http://127.0.0.1:9999/heartbeat?device="..deviceId, Method="GET" })
+            end
+        end)
+        task.wait(20)
+    end
+end)
+
+-- ══════════════════════════════════════════
+-- RESPAWN — DO NOT MODIFY TP/GUARD LOGIC
+-- ══════════════════════════════════════════
+lp.CharacterAdded:Connect(function(c)
+    character=c
+    task.wait(1)
+    clearAnchor()
+    log("RESPAWN", string.format(
+        "CharacterAdded | gi=%s(done=%s,mode=%s) hatch=%s season=%s rift=%s obsrift=%s doodle=%s j4rift=%s genie=%s | egg=%s",
+        tostring(State.giRunning), tostring(State.giQuestsDone), tostring(State.giMode),
+        tostring(State.hatchRunning), tostring(State.seasonRunning), tostring(State.riftRunning),
+        tostring(State.obsidianRiftRunning), tostring(State.doodleRiftRunning),
+        tostring(State.july4thRiftRunning), tostring(State.genieRunning),
+        tostring(State.selectedEggKey)
+    ))
+    if riftActive() and State.riftHatchPos then
+        tp(State.riftHatchPos,"respawn_rift") return
+    end
+    if State.obsidianRiftRunning and State.obsidianRiftHatchPos then
+        tp(State.obsidianRiftHatchPos,"respawn_obsrift") return
+    end
+    if State.doodleRiftRunning and State.doodleRiftHatchPos then
+        tp(State.doodleRiftHatchPos,"respawn_doodle") return
+    end
+    if State.july4thRiftRunning and State.july4thRiftHatchPos then
+        tp(State.july4thRiftHatchPos,"respawn_j4rift") return
+    end
+    if State.giRunning and not State.giQuestsDone then
+        if State.giMode=="bub" then
+            tp(EGG_POSITIONS.BubbleZone,"respawn_gi_bub")
+        elseif State.giMode=="leg" then
+            tp(EGG_POSITIONS.SpikeyEgg,"respawn_gi_leg")
+        elseif State.giMode=="reg" then
+            tp(EGG_POSITIONS[State.selectedEggKey],"respawn_gi_reg")
+        end
+    elseif State.hatchRunning and not seasonBlocking() and not genieBlocking() then
+        tp(EGG_POSITIONS[State.selectedEggKey],"respawn_hatch")
+    end
+end)
+
+-- ══════════════════════════════════════════
+-- PERIODIC SNAPSHOT
+-- ══════════════════════════════════════════
+task.spawn(function()
+    while true do
+        task.wait(10)
+        log("SNAP", string.format(
+            "gi=%s(done=%s) hatch=%s season=%s rift=%s obsrift=%s doodle=%s(active=%s) j4rift=%s(active=%s) genie=%s(mode=%s) rebirth=%s | egg=%s | hourly=%s daily=%s",
+            tostring(State.giRunning), tostring(State.giQuestsDone),
+            tostring(State.hatchRunning), tostring(State.seasonRunning), tostring(State.riftRunning),
+            tostring(State.obsidianRiftRunning),
+            tostring(State.doodleRiftRunning), tostring(State.doodleRiftHatchPos ~= nil),
+            tostring(State.july4thRiftRunning), tostring(State.july4thRiftHatchPos ~= nil),
+            tostring(State.genieRunning), tostring(State.genieMode),
+            tostring(State.rebirthRunning),
+            tostring(State.selectedEggKey), tostring(State.hourlyDone), tostring(State.dailyDone)
+        ))
+    end
+end)
+
+task.spawn(function() while task.wait(5) do updateQuests() end end)
+
+-- ══════════════════════════════════════════
+-- PUBLIC API
+-- ══════════════════════════════════════════
+_G.FH = {
+    State=State, EGG_POSITIONS=EGG_POSITIONS, EGG_NAMES=EGG_NAMES,
+    EGG_NAME_TO_KEY=EGG_NAME_TO_KEY, EGG_KEY_TO_NAME=EGG_KEY_TO_NAME,
+    GI_QUESTS=GlobalIncentiveUtil.Quests, RIFT_DURATIONS=RIFT_DURATIONS,
+    GENIE_REWARD_ITEMS=GENIE_REWARD_ITEMS,
+    getGINeeds=getGINeeds, updateQuests=updateQuests,
+    fireAllShrines=fireAllShrines, claimAllPlaytime=claimAllPlaytime,
+    doClaimGIRewards=doClaimGIRewards, sendWebhook=sendWebhook,
+    sendWebhookEmbed=sendWebhookEmbed,
+    formatTime=formatTime, secsUntilNextHour=secsUntilNextHour,
+    secsUntilMidnight=secsUntilMidnight,
+    getLog=getLog, clearLog=clearLog,
+    eggNameToSlug=eggNameToSlug, findRiftHatchPos=findRiftHatchPos,
+    genieSecsUntilReady=genieSecsUntilReady,
+    getActiveGenieQuest=getActiveGenieQuest,
+    isGenieQuestDone=isGenieQuestDone,
+    obsidianRiftExistsNow=obsidianRiftExistsNow,
+    obsidianRiftBlocking=obsidianRiftBlocking,
+    doodleRiftBlocking=doodleRiftBlocking,
+    july4thRiftBlocking=july4thRiftBlocking,
+    applyPickupRangePatch=applyPickupRangePatch,
+    removePickupRangePatch=removePickupRangePatch,
+    CARNIVAL_COIN_TP_POS=CARNIVAL_COIN_TP_POS,
+    getRebirthPets=getRebirthPets,
+
+    startGI=function()
+        if State.giRunning then return end
+        State.giRunning=true State.giMode="idle" State.giOldSeed=nil State.giQuestsDone=false
+        clearAnchor() task.spawn(runGILoop)
+    end,
+    stopGI=function()
+        State.giRunning=false State.giMode="idle" State.giQuestsDone=false clearAnchor()
+    end,
+    startSeason=function()
+        if not State.seasonRunning then State.seasonRunning=true task.spawn(runSeasonLoop) end
+    end,
+    stopSeason=function() State.seasonRunning=false clearAnchor() end,
+    startHatch=function()
+        if not State.hatchRunning then
+            if not EGG_POSITIONS[State.selectedEggKey] then
+                warn("[FlookHub] No position saved for "..tostring(State.selectedEggKey)) return
+            end
+            State.hatchRunning=true task.spawn(runHatchLoop)
+        end
+    end,
+    stopHatch=function() State.hatchRunning=false clearAnchor() end,
+    startRift=function()
+        if not State.riftRunning then State.riftRunning=true task.spawn(runRiftLoop) end
+    end,
+    stopRift=function()
+        State.riftRunning=false State.riftHatchPos=nil State.riftExpireTime=0 clearAnchor()
+    end,
+    startObsidianRift=function()
+        if not State.obsidianRiftRunning then
+            State.obsidianRiftRunning=true task.spawn(runObsidianRiftLoop)
+        end
+    end,
+    stopObsidianRift=function()
+        State.obsidianRiftRunning=false State.obsidianRiftHatchPos=nil
+        State.obsidianRiftSpawnHeight=nil clearAnchor()
+    end,
+    startDoodleRift=function()
+        if not State.doodleRiftRunning then
+            log("API","startDoodleRift")
+            State.doodleRiftRunning=true task.spawn(runDoodleRiftLoop)
+        end
+    end,
+    stopDoodleRift=function()
+        log("API","stopDoodleRift")
+        State.doodleRiftRunning=false State.doodleRiftHatchPos=nil clearAnchor()
+    end,
+    startJuly4thRift=function()
+        if not State.july4thRiftRunning then
+            State.july4thRiftRunning=true task.spawn(runJuly4thRiftLoop)
+        end
+    end,
+    stopJuly4thRift=function()
+        State.july4thRiftRunning=false State.july4thRiftHatchPos=nil clearAnchor()
+    end,
+    startRebirthMachine=function()
+        if not State.rebirthRunning then
+            log("API","startRebirthMachine | pet="..tostring(State.rebirthConfig.petName))
+            State.rebirthRunning=true task.spawn(runRebirthMachineLoop)
+        end
+    end,
+    stopRebirthMachine=function()
+        log("API","stopRebirthMachine") State.rebirthRunning=false
+    end,
+    startEnchant=function()
+        if not State.enchanting then State.enchanting=true task.spawn(runEnchantLoop) end
+    end,
+    stopEnchant=function() State.enchanting=false end,
+    startShrine=function()
+        if not State.shrineRunning then State.shrineRunning=true task.spawn(runShrineLoop) end
+    end,
+    stopShrine=function() State.shrineRunning=false State.shrineNextRun=0 end,
+    startPlaytime=function()
+        if not State.playtimeRunning then State.playtimeRunning=true task.spawn(runPlaytimeLoop) end
+    end,
+    stopPlaytime=function() State.playtimeRunning=false end,
+    startPresentRain=function()
+        if not State.prRunning then State.prRunning=true State.prCount=0 task.spawn(runPresentRainLoop) end
+    end,
+    stopPresentRain=function()
+        State.prRunning=false if State.prConn then State.prConn:Disconnect() State.prConn=nil end
+    end,
+    startAFK=function()
+        if not State.afkRunning then State.afkRunning=true task.spawn(runAFKLoop) end
+    end,
+    stopAFK=function() State.afkRunning=false end,
+    startClaimGI=function()
+        if not State.claimGIOn then State.claimGIOn=true task.spawn(runClaimGILoop) end
+    end,
+    stopClaimGI=function() State.claimGIOn=false end,
+    startGenie=function()
+        if not State.genieRunning then
+            State.genieRunning=true State.genieQuestActive=false State.genieQuestDone=false
+            task.spawn(runGenieLoop)
+        end
+    end,
+    stopGenie=function()
+        State.genieRunning=false State.genieQuestActive=false clearAnchor()
+    end,
+    startCarnivalChest=function()
+        if not State.carnivalChestRunning then
+            State.carnivalChestRunning=true task.spawn(runCarnivalChestLoop)
+        end
+    end,
+    stopCarnivalChest=function() State.carnivalChestRunning=false end,
+    startCarnivalRebirth=function()
+        if not State.carnivalRebirthRunning then
+            State.carnivalRebirthRunning=true task.spawn(runCarnivalRebirthLoop)
+        end
+    end,
+    stopCarnivalRebirth=function() State.carnivalRebirthRunning=false end,
+    startCarnivalCoinTp=function()
+        if not State.carnivalCoinTpRunning then
+            State.carnivalCoinTpRunning=true task.spawn(runCarnivalCoinTpLoop)
+        end
+    end,
+    stopCarnivalCoinTp=function() State.carnivalCoinTpRunning=false end,
+    startPickupRange=function()
+        if not State.pickupRangeRunning then
+            State.pickupRangeRunning=true applyPickupRangePatch()
+        end
+    end,
+    stopPickupRange=function()
+        State.pickupRangeRunning=false removePickupRangePatch()
+    end,
+    savePos=function(key,pos)
+        EGG_POSITIONS[key]=pos
+    end,
+}
+
+-- ══════════════════════════════════════════
+-- INIT
+-- ══════════════════════════════════════════
+task.delay(0.5, function()
+    pcall(function()
+        local lp2 = game:GetService("Players").LocalPlayer
+        local intro = lp2.PlayerGui:FindFirstChild("Intro")
+        if intro then intro:Destroy() end
+        local sg = lp2.PlayerGui:FindFirstChild("ScreenGui")
+        if sg then sg.Enabled = true end
+        game.StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.All, true)
+    end)
+
+    log("INIT","auto-starting | egg="..tostring(State.selectedEggKey))
+
+    local function autostart(stateKey, startFn, label)
+        local wanted = State[stateKey]
+        log("INIT", label.." default="..tostring(wanted))
+        State[stateKey] = false
+        if wanted then startFn() end
+    end
+
+    autostart("giRunning",              _G.FH.startGI,              "GI")
+    autostart("claimGIOn",              _G.FH.startClaimGI,         "ClaimGI")
+    autostart("seasonRunning",          _G.FH.startSeason,          "Season")
+    autostart("hatchRunning",           _G.FH.startHatch,           "Hatch")
+    autostart("riftRunning",            _G.FH.startRift,            "Rift")
+    autostart("obsidianRiftRunning",    _G.FH.startObsidianRift,    "ObsidianRift")
+    autostart("doodleRiftRunning",      _G.FH.startDoodleRift,      "DoodleRift")
+    autostart("july4thRiftRunning",     _G.FH.startJuly4thRift,     "July4thRift")
+    autostart("genieRunning",           _G.FH.startGenie,           "Genie")
+    autostart("rebirthRunning",         _G.FH.startRebirthMachine,  "Rebirth")
+    autostart("enchanting",             _G.FH.startEnchant,         "Enchant")
+    autostart("shrineRunning",          _G.FH.startShrine,          "Shrine")
+    autostart("playtimeRunning",        _G.FH.startPlaytime,        "Playtime")
+    autostart("prRunning",              _G.FH.startPresentRain,     "PresentRain")
+    autostart("afkRunning",             _G.FH.startAFK,             "AFK")
+    autostart("carnivalChestRunning",   _G.FH.startCarnivalChest,   "CarnivalChest")
+    autostart("carnivalRebirthRunning", _G.FH.startCarnivalRebirth, "CarnivalRebirth")
+    autostart("carnivalCoinTpRunning",  _G.FH.startCarnivalCoinTp,  "CarnivalCoinTp")
+    autostart("pickupRangeRunning",     _G.FH.startPickupRange,     "PickupRange")
+
+    log("INIT","auto-start complete")
+end)
+
+print("[FlookHub] Core v17 loaded — run UI script now")
+print("[FlookHub] v17: Blacklist fix — Pearls+Tickets both properly skipped")
+print("[FlookHub] v17: Doodle Rift added (passive, slug=doodle-rift, priority above July4th)")
+print("[FlookHub] v17: Rebirth Machine added — finds 5x matching Secret pets and converts")
+print("[FlookHub] v17: Priority: GI > Season > Genie > DoodleRift > ObsRift > July4th > Hatch")
