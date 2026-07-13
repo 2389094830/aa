@@ -91,10 +91,10 @@ local State = {
     giRunning           = false,
     seasonRunning       = true,
     hatchRunning        = true,
-    riftRunning         = false,
+    riftRunning         = true,
     obsidianRiftRunning = false,
     enchanting          = true,
-    shrineRunning       = false,
+    shrineRunning       = true,
     playtimeRunning     = true,
     prRunning           = true,
     afkRunning          = true,
@@ -106,7 +106,7 @@ local State = {
 
     -- Misc
     pickupRangeRunning  = true,
-    pickupRangeStuds    = 250,
+    pickupRangeStuds    = math.huge,
 
     -- Event
     carnivalChestRunning    = true,
@@ -118,7 +118,7 @@ local State = {
     -- July 4th Rift
     july4thRiftRunning  = true,
     july4thRiftHatchPos = nil,
-    july4thRiftSlugs    = {"july4th-rift-3"},
+    july4thRiftSlugs    = {"july4th-rift-3", "july4th-rift-2", "july4th-rift-1"},
 
     -- Doodle Rift
     doodleRiftRunning  = true,
@@ -126,15 +126,15 @@ local State = {
     doodleRiftSlug     = "doodle-rift",
 
     -- Gem Genie
-    genieRunning      = false,
+    genieRunning      = true,
     genieMode         = "reroll",
-    genieRerollTarget = "Shadow Crystal",
+    genieRerollTarget = "Green Fragment",
     genieQuestActive  = false,
     genieQuestDone    = false,
 
     -- Rebirth Machine
     rebirthConfig = {
-        petName     = "Hyperwave Doggy",
+        petName     = "Patriotic Mush",
         autoRebirth = true,
     },
     rebirthRunning   = true,
