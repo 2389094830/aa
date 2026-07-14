@@ -128,7 +128,7 @@ local State = {
     -- Gem Genie
     genieRunning      = true,
     genieMode         = "reroll",
-    genieRerollTarget = "Green Fragment",
+    genieRerollTarget = "Ultra Infinity Elixir",
     genieQuestActive  = false,
     genieQuestDone    = false,
 
