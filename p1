@@ -89,7 +89,7 @@ local function clearLog() debugLog = {} end
 -- ══════════════════════════════════════════
 local State = {
     giRunning           = false,
-    seasonRunning       = true,
+    seasonRunning       = false,
     hatchRunning        = true,
     riftRunning         = false,
     obsidianRiftRunning = false,
@@ -126,7 +126,7 @@ local State = {
     doodleRiftSlug     = "doodle-rift",
 
     -- Gem Genie
-    genieRunning      = true,
+    genieRunning      = false,
     genieMode         = "reroll",
     genieRerollTarget = "Ultra Infinity Elixir",
     genieQuestActive  = false,
