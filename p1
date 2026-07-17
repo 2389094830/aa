@@ -89,7 +89,7 @@ local function clearLog() debugLog = {} end
 -- ══════════════════════════════════════════
 local State = {
     giRunning           = false,
-    seasonRunning       = false,
+    seasonRunning       = true,
     hatchRunning        = true,
     riftRunning         = false,
     obsidianRiftRunning = false,
@@ -126,7 +126,7 @@ local State = {
     doodleRiftSlug     = "doodle-rift",
 
     -- Gem Genie
-    genieRunning      = false,
+    genieRunning      = true,
     genieMode         = "reroll",
     genieRerollTarget = "Ultra Infinity Elixir",
     genieQuestActive  = false,
@@ -194,7 +194,7 @@ local State = {
 -- EGG DATA
 -- ══════════════════════════════════════════
 local EGG_POSITIONS = {
-    PatrioticEgg = Vector3.new(35.726,    7.432,  -13.731),
+    PatrioticEgg = Vector3.new(3506.726,    165.432,  939.731),
     SweetEgg     = Vector3.new(-3589.398, 160.009, 883.124),
     ExoticEgg    = Vector3.new(-3578.343, 160.009, 881.48),
     PlushieEgg	 = Vector3.new(-3567.343, 160.009, 881.48),
