@@ -134,7 +134,7 @@ local State = {
 
     -- Rebirth Machine
     rebirthConfig = {
-        petName     = "Patriotic Mush", "Taffy Dogcat",
+        petName     = "Patriotic Mush",
         autoRebirth = true,
     },
     rebirthRunning   = true,
