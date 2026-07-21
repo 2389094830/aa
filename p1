@@ -89,7 +89,7 @@ local function clearLog() debugLog = {} end
 -- ══════════════════════════════════════════
 local State = {
     giRunning           = false,
-    seasonRunning       = false,
+    seasonRunning       = true,
     hatchRunning        = true,
     riftRunning         = false,
     obsidianRiftRunning = false,
@@ -111,7 +111,7 @@ local State = {
     -- Event
     carnivalChestRunning    = true,
     carnivalChestInterval   = 30,
-    carnivalRebirthRunning  = false,
+    carnivalRebirthRunning  = true,
     carnivalRebirthInterval = 5,
     carnivalCoinTpRunning   = false,
 
@@ -128,13 +128,13 @@ local State = {
     -- Gem Genie
     genieRunning      = true,
     genieMode         = "reroll",
-    genieRerollTarget = "Ultra Infinity Elixir",
+    genieRerollTarget = "Green Fragment",
     genieQuestActive  = false,
     genieQuestDone    = false,
 
     -- Rebirth Machine
     rebirthConfig = {
-        petName     = "Patriotic Mush",
+        petName     = "Patriotic Mush", "Taffy Dogcat",
         autoRebirth = true,
     },
     rebirthRunning   = true,
@@ -146,8 +146,8 @@ local State = {
     lastTpKey    = nil,
     lastTpTime   = 0,
 
-    selectedEggName = "Patriotic Egg",
-    selectedEggKey  = "PatrioticEgg",
+    selectedEggName = "Plushie Egg",
+    selectedEggKey  = "PlushieEgg",
 
     hourlyDone = false, dailyDone = false,
     hourlyDet  = {},    dailyDet  = {},
@@ -156,7 +156,7 @@ local State = {
     prCount = 0,
     prConn  = nil,
 
-    enchantTargets  = {"secret-hunter","ultra-roller"},
+    enchantTargets  = {"secret-hunter","determination"},
     enchantCurrency = "Gems",
 
     riftConfig = {
