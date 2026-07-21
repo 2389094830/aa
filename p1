@@ -89,7 +89,7 @@ local function clearLog() debugLog = {} end
 -- ══════════════════════════════════════════
 local State = {
     giRunning           = false,
-    seasonRunning       = false,
+    seasonRunning       = true,
     hatchRunning        = true,
     riftRunning         = false,
     obsidianRiftRunning = false,
