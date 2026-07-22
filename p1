@@ -146,8 +146,8 @@ local State = {
     lastTpKey    = nil,
     lastTpTime   = 0,
 
-    selectedEggName = "Plushie Egg",
-    selectedEggKey  = "PlushieEgg",
+    selectedEggName = "Patriotic Egg",
+    selectedEggKey  = "PatrioticEgg",
 
     hourlyDone = false, dailyDone = false,
     hourlyDet  = {},    dailyDet  = {},
