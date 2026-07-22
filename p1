@@ -156,7 +156,7 @@ local State = {
     prCount = 0,
     prConn  = nil,
 
-    enchantTargets  = {"secret-hunter","determination"},
+    enchantTargets  = {"secret-hunter","ultra-roller"},
     enchantCurrency = "Gems",
 
     riftConfig = {
