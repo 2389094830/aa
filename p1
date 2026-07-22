@@ -111,7 +111,7 @@ local State = {
     -- Event
     carnivalChestRunning    = true,
     carnivalChestInterval   = 30,
-    carnivalRebirthRunning  = true,
+    carnivalRebirthRunning  = false,
     carnivalRebirthInterval = 5,
     carnivalCoinTpRunning   = false,
 
