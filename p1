@@ -1103,7 +1103,7 @@ local function runGenieLoop()
             State.genieQuestDone   = false
             local slotToPick = 1
             if State.genieMode == "reroll" and State.genieRerollTarget and State.genieRerollTarget ~= "" then
-                local maxRerolls = 30
+                local maxRerolls = 300000
                 local rolls      = 0
                 while State.genieRunning and rolls <= maxRerolls do
                     if giBlocking() or seasonBlocking() or obsidianRiftBlocking() then break end
