@@ -116,17 +116,17 @@ local State = {
     carnivalCoinTpRunning   = false,
 
     -- July 4th Rift
-    july4thRiftRunning  = true,
+    july4thRiftRunning  = false,
     july4thRiftHatchPos = nil,
     july4thRiftSlugs    = {"july4th-rift-3", "july4th-rift-2", "july4th-rift-1"},
 
     -- Doodle Rift
-    doodleRiftRunning  = true,
+    doodleRiftRunning  = false,
     doodleRiftHatchPos = nil,
     doodleRiftSlug     = "doodle-rift",
 
     -- Gem Genie
-    genieRunning      = true,
+    genieRunning      = false,
     genieMode         = "reroll",
     genieRerollTarget = "Green Fragment",
     genieQuestActive  = false,
@@ -194,7 +194,7 @@ local State = {
 -- EGG DATA
 -- ══════════════════════════════════════════
 local EGG_POSITIONS = {
-    PatrioticEgg = Vector3.new(-3506, 165, 939),
+    PatrioticEgg = Vector3.new(-133, 9, 67),
     SweetEgg     = Vector3.new(-3589.398, 160.009, 883.124),
     ExoticEgg    = Vector3.new(-3578.343, 160.009, 881.48),
     PlushieEgg	 = Vector3.new(-3567.343, 160.009, 881.48),
