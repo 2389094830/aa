@@ -194,7 +194,7 @@ local State = {
 -- EGG DATA
 -- ══════════════════════════════════════════
 local EGG_POSITIONS = {
-    PatrioticEgg = Vector3.new(-133, 9, 67),
+    PatrioticEgg = Vector3.new(133, 9, 67),
     SweetEgg     = Vector3.new(-3589.398, 160.009, 883.124),
     ExoticEgg    = Vector3.new(-3578.343, 160.009, 881.48),
     PlushieEgg	 = Vector3.new(-3567.343, 160.009, 881.48),
