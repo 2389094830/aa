@@ -89,7 +89,7 @@ local function clearLog() debugLog = {} end
 -- ══════════════════════════════════════════
 local State = {
     giRunning           = false,
-    seasonRunning       = false,
+    seasonRunning       = true,
     hatchRunning        = true,
     riftRunning         = false,
     obsidianRiftRunning = false,
@@ -126,7 +126,7 @@ local State = {
     doodleRiftSlug     = "doodle-rift",
 
     -- Gem Genie
-    genieRunning      = false,
+    genieRunning      = true,
     genieMode         = "reroll",
     genieRerollTarget = "Green Fragment",
     genieQuestActive  = false,
@@ -146,8 +146,8 @@ local State = {
     lastTpKey    = nil,
     lastTpTime   = 0,
 
-    selectedEggName = "Patriotic Egg",
-    selectedEggKey  = "PatrioticEgg",
+    selectedEggName = "Sweet Egg",
+    selectedEggKey  = "SweetEgg",
 
     hourlyDone = false, dailyDone = false,
     hourlyDet  = {},    dailyDet  = {},
@@ -195,7 +195,7 @@ local State = {
 -- ══════════════════════════════════════════
 local EGG_POSITIONS = {
     PatrioticEgg = Vector3.new(130, 9, 69),
-    SweetEgg     = Vector3.new(-3589.398, 160.009, 883.124),
+    SweetEgg     = Vector3.new(131, 9, 85),
     ExoticEgg    = Vector3.new(-3578.343, 160.009, 881.48),
     PlushieEgg	 = Vector3.new(-3567.343, 160.009, 881.48),
     NewEgg       = Vector3.new(-3578.343, 160.009, 881.48),
