@@ -111,8 +111,8 @@ local State = {
     -- Event
     carnivalChestRunning    = true,
     carnivalChestInterval   = 30,
-    carnivalRebirthRunning  = false,
-    carnivalRebirthInterval = 5,
+    carnivalRebirthRunning  = true,
+    carnivalRebirthInterval = 1,
     carnivalCoinTpRunning   = false,
 
     -- July 4th Rift
@@ -126,7 +126,7 @@ local State = {
     doodleRiftSlug     = "doodle-rift",
 
     -- Gem Genie
-    genieRunning      = true,
+    genieRunning      = false,
     genieMode         = "reroll",
     genieRerollTarget = "Ultra Infinity Elixir",
     genieQuestActive  = false,
@@ -134,7 +134,7 @@ local State = {
 
     -- Rebirth Machine
     rebirthConfig = {
-        petName     = "Patriotic Mush", "Taffy Dogcat", "Crowned Coin", "Jester Axolotl Plushie", "Doggy Plushie", "Bunny Plushie", "TV BOT" ,"Goat Boi",
+        petName     = "Taffy Dogcat",
         autoRebirth = true,
     },
     rebirthRunning   = true,
@@ -1578,7 +1578,7 @@ end
 local function runCarnivalRebirthLoop()
     while State.carnivalRebirthRunning do
         setAction("Event: Carnival Rebirth firing...")
-        pcall(function() Remote:FireServer("CarnivalRebirth") end)
+        pcall(function() Remote:FireServer("ClaimSeason") end)
         local s = tick()
         while State.carnivalRebirthRunning and tick()-s < (State.carnivalRebirthInterval or 5) do task.wait(1) end
     end
